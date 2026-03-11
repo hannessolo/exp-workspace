@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Space</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <link rel="stylesheet" href="https://da.live/nx/styles/nexter.css">
+  <link rel="stylesheet" href="/tools/space/space.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "da-lit": "https://da.live/deps/lit/dist/index.js"
+      }
+    }
+  </script>
+  <script src="https://da.live/nx/utils/sdk.js" type="module"></script>
+  <script
+    src="https://jspm.dev/@spectrum-web-components/bundle/elements.js"
+    type="module"
+  ></script>
+  <script src="/tools/space/space.js" type="module"></script>
+  <link rel="icon" href="data:,">
+  <style>
+    html, body { height: 100%; width: 100%; margin: 0; overflow: hidden; }
+    main { height: 100%; width: 100%; overflow: hidden; }
+    sp-theme, da-space { display: block; height: 100%; width: 100%; min-width: 0; overflow: hidden; }
+  </style>
+</head>
+<body>
+<main>
+  <sp-theme system="spectrum-two" scale="medium" color="light">
+    <da-space></da-space>
+  </sp-theme>
+</main>
+</body>
+</html>
