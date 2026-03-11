@@ -32,14 +32,22 @@ function getHashPath() {
  */
 async function fetchList(fullpath) {
   const url = `${DA_ORIGIN}/list${fullpath}`;
-  const resp = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-  if (!resp.ok) throw new Error(`List failed: ${resp.status}`);
-  const json = await resp.json();
-  return Array.isArray(json) ? json : json?.items || [];
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!resp.ok) {
+      console.error('[da-file-browser] fetchList failed', { url, status: resp.status, statusText: resp.statusText });
+      throw new Error(`List failed: ${resp.status}`);
+    }
+    const json = await resp.json();
+    return Array.isArray(json) ? json : json?.items || [];
+  } catch (e) {
+    console.error('[da-file-browser] fetchList error', { url, message: e?.message, cause: e?.cause });
+    throw e;
+  }
 }
 
 /**

@@ -4,6 +4,7 @@ import getStyle from 'https://da.live/nx/utils/styles.js';
 import { LitElement, html } from 'da-lit';
 import '/src/chat/chat.js';
 import '/src/file-browser/file-browser.js';
+import '/tools/space/da-inline-editor.js';
 
 const style = await getStyle(import.meta.url);
 
@@ -69,19 +70,6 @@ class Space extends LitElement {
     return `https://main--${repo}--${org}.preview.da.live/${encodedPath}?nx=qe-img-security&quick-edit=qe-img-security`;
   }
 
-  get _editUrl() {
-    if (!this._orgRepo || !this._selectedPath) return null;
-    const pathWithoutHtml = this._selectedPath.replace(/\.html$/i, '');
-    const path = pathWithoutHtml.split('/').map(encodeURIComponent).join('/');
-    return `https://da.live/edit#/${path}`;
-  }
-
-  _openEditInNewTab(e) {
-    if (!this._editUrl) {
-      e.preventDefault();
-    }
-  }
-
   render() {
     const iframeSrc = this._wysiwygIframeSrc;
     return html`
@@ -114,17 +102,13 @@ class Space extends LitElement {
               >
                 <div class="main-pane main-pane-doc">
                   <span class="main-pane-label">Editor</span>
-                  <div class="main-pane-doc-actions">
-                    <a
-                      href="${this._editUrl || '#'}"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="main-pane-doc-open-editor ${!this._editUrl ? 'main-pane-doc-open-editor-disabled' : ''}"
-                      @click="${this._openEditInNewTab}"
-                      aria-label="Open in editor"
-                    >Open in editor</a>
+                  <div class="main-pane-doc-editor">
+                    <da-inline-editor
+                      .org="${this._orgRepo?.org ?? ''}"
+                      .repo="${this._orgRepo?.repo ?? ''}"
+                      .path="${this._selectedPath ?? ''}"
+                    ></da-inline-editor>
                   </div>
-                  <slot name="doc"></slot>
                 </div>
                 <div class="main-pane main-pane-wysiwyg">
                   <span class="main-pane-label">WYSIWYG</span>
@@ -134,6 +118,8 @@ class Space extends LitElement {
                           title="WYSIWYG preview"
                           src="${iframeSrc}"
                           class="main-pane-wysiwyg-iframe"
+                          @load="${() => { console.log('[da-space] WYSIWYG iframe load', iframeSrc); }}"
+                          @error="${() => { console.error('[da-space] WYSIWYG iframe error', iframeSrc); }}"
                         ></iframe>`
                       : html`<div class="main-pane-wysiwyg-placeholder">
                           Select a file and set hash to <code>#/org/site</code> to preview.
