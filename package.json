@@ -32,6 +32,7 @@
     "@spectrum-web-components/asset": "^1.11.2",
     "@spectrum-web-components/button": "^1.11.2",
     "@spectrum-web-components/split-view": "^1.11.2",
+    "@spectrum-web-components/tabs": "^1.11.2",
     "@spectrum-web-components/textfield": "^1.11.2",
     "@spectrum-web-components/theme": "^1.11.2",
     "esbuild": "^0.21.0"
