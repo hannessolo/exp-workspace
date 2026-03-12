@@ -63,6 +63,7 @@ class Space extends LitElement {
     _chatOpen: { state: true },
     _detailsOpen: { state: true },
     _publishLoading: { state: true },
+    _collabUsers: { state: true },
   };
 
   constructor() {
@@ -75,7 +76,13 @@ class Space extends LitElement {
     this._chatOpen = true;
     this._detailsOpen = true;
     this._publishLoading = false;
+    this._collabUsers = [];
   }
+
+  _boundCollabUsers = (e) => {
+    const users = e.detail?.users;
+    this._collabUsers = Array.isArray(users) ? users : [];
+  };
 
   _boundHashChange = () => {
     this._orgRepo = getOrgRepoFromHash();
@@ -180,11 +187,13 @@ class Space extends LitElement {
     this._boundHashChange();
     window.addEventListener('hashchange', this._boundHashChange);
     this.addEventListener('da-file-browser-select', this._boundFileSelect);
+    this.addEventListener('da-collab-users', this._boundCollabUsers);
   }
 
   disconnectedCallback() {
     window.removeEventListener('hashchange', this._boundHashChange);
     this.removeEventListener('da-file-browser-select', this._boundFileSelect);
+    this.removeEventListener('da-collab-users', this._boundCollabUsers);
     super.disconnectedCallback();
   }
 
@@ -262,6 +271,18 @@ class Space extends LitElement {
     `;
   }
 
+  _renderCollabUsers() {
+    if (!this._collabUsers?.length) return '';
+    return html`
+      <div class="space-collab-users" aria-label="Connected users">
+        ${this._collabUsers.map((user) => {
+    const initials = user.split(' ').map((name) => name.toString().substring(0, 1)).join('');
+    return html`<span class="space-collab-user" title="${user}">${initials}</span>`;
+  })}
+      </div>
+    `;
+  }
+
   _renderPublishMenu() {
     return html`
       <sp-action-menu label="Publish menu" class="space-publish-menu-trigger">
@@ -304,11 +325,11 @@ class Space extends LitElement {
     const isLast = i === segments.length - 1;
     const isFolder = !isLast;
     return html`
-      <span class="space-breadcrumb-segment">
-        ${i > 0 ? html`<span class="space-breadcrumb-sep" aria-hidden="true">/</span>` : ''}
-        ${this._renderBreadcrumbCrumb(name, pathKey, isOrgOrRepo, isFolder)}
-      </span>
-    `;
+  <span class="space-breadcrumb-segment">
+    ${i > 0 ? html`<span class="space-breadcrumb-sep" aria-hidden="true">/</span>` : ''}
+    ${this._renderBreadcrumbCrumb(name, pathKey, isOrgOrRepo, isFolder)}
+  </span>
+`;
   })}
       </nav>
     `;
@@ -427,6 +448,7 @@ class Space extends LitElement {
             </sp-action-button>
           </div>
           <div class="space-nav-right">
+            ${this._renderCollabUsers()}
             ${this._renderPublishMenu()}
           </div>
         </nav>

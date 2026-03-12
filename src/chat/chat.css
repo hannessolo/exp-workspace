@@ -57,6 +57,15 @@
   background: #1473e6;
 }
 
+.chat .chat-skills-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(135deg, #7d5ba6 0%, #9b7bbf 50%, #8b6cb8 100%);
+  border-top: 1px solid rgb(255 255 255 / 0.15);
+}
+
 .chat .chat-footer {
   flex-shrink: 0;
   display: flex;
@@ -70,4 +79,47 @@
 .chat .chat-input {
   flex: 1;
   min-width: 0;
+}
+
+/* Skills library modal (overlay-trigger + sp-dialog-wrapper) */
+.chat-skills-modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.chat-skills-sidenav {
+  flex-shrink: 0;
+  width: 160px;
+  border-right: 1px solid var(--spectrum-neutral-border-color, #e0e0e0);
+}
+
+.chat-skills-content {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}
+
+.chat-skills-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--spectrum-global-color-gray-600, #6b6b6b);
+  text-align: center;
+}
+
+.chat-skills-empty-icon {
+  width: 48px;
+  height: 48px;
+  opacity: 0.6;
+}
+
+.chat-skills-empty-text {
+  margin: 0;
+  font-size: 0.875rem;
 }

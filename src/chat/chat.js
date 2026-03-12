@@ -15,6 +15,7 @@ class Chat extends LitElement {
     message: { type: String },
     messages: { type: Array },
     header: { type: String },
+    _skillsLibraryTab: { state: true },
   };
 
   constructor() {
@@ -22,6 +23,7 @@ class Chat extends LitElement {
     this.message = '';
     this.messages = [];
     this.header = 'Chat';
+    this._skillsLibraryTab = 'skills';
   }
 
   connectedCallback() {
@@ -60,6 +62,11 @@ class Chat extends LitElement {
     }
   }
 
+  _onSkillsNavChange(e) {
+    const value = e.target?.value;
+    if (value) this._skillsLibraryTab = value;
+  }
+
   render() {
     return html`
       <div class="chat">
@@ -74,6 +81,32 @@ class Chat extends LitElement {
                   </div>
                 `,
     )}
+        </div>
+        <div class="chat-skills-bar">
+          <overlay-trigger type="modal" triggered-by="click">
+            <sp-dialog-wrapper slot="click-content" headline="Skills library" dismissable underlay>
+              <div class="chat-skills-modal-body">
+                <sp-sidenav
+                  class="chat-skills-sidenav"
+                  .value="${this._skillsLibraryTab}"
+                  @change="${this._onSkillsNavChange}"
+                >
+                  <sp-sidenav-item value="skills" label="Skills" ?selected="${this._skillsLibraryTab === 'skills'}"></sp-sidenav-item>
+                  <sp-sidenav-item value="mcp" label="MCP" ?selected="${this._skillsLibraryTab === 'mcp'}"></sp-sidenav-item>
+                  <sp-sidenav-item value="agents" label="Agents" ?selected="${this._skillsLibraryTab === 'agents'}"></sp-sidenav-item>
+                </sp-sidenav>
+                <div class="chat-skills-content">
+                  <div class="chat-skills-empty">
+                    <svg class="chat-skills-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                      <path d="M2 12h4v8H2zM10 6h4v14h-4zM18 2h4v20h-4z"/>
+                    </svg>
+                    <p class="chat-skills-empty-text">Nothing here yet.</p>
+                  </div>
+                </div>
+              </div>
+            </sp-dialog-wrapper>
+            <sp-button slot="trigger" variant="secondary" size="s">Skills library</sp-button>
+          </overlay-trigger>
         </div>
         <div class="chat-footer">
           <sp-textfield

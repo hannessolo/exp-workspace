@@ -83,15 +83,65 @@ export default class DaInlineEditor extends LitElement {
     });
   }
 
+  /**
+   * Subscribe to Yjs awareness updates and dispatch da-collab-users to parent (bubbles).
+   * Same logic as handleAwarenessUpdates in da-live blocks/edit/prose/index.js.
+   * @param {import('y-websocket').WebsocketProvider} wsProvider
+   */
+  _setupAwarenessUpdates(wsProvider) {
+    if (this._awarenessOff) {
+      this._awarenessOff();
+      this._awarenessOff = null;
+    }
+    const users = new Set();
+    const dispatchUsers = () => {
+      const self = wsProvider.awareness.clientID;
+      const awarenessStates = wsProvider.awareness.getStates();
+      const userMap = new Map();
+      [...users].forEach((u, i) => {
+        if (u === self) return;
+        const userInfo = awarenessStates.get(u)?.user;
+        if (!userInfo?.name) {
+          userMap.set(`anonymous-${u}`, 'Anonymous');
+        } else {
+          userMap.set(`${userInfo.id}-${i}`, userInfo.name);
+        }
+      });
+      const userList = [...userMap.values()].sort();
+      this.dispatchEvent(new CustomEvent('da-collab-users', {
+        bubbles: true,
+        composed: true,
+        detail: { users: userList },
+      }));
+    };
+    const onUpdate = (delta) => {
+      delta.added.forEach((u) => users.add(u));
+      delta.updated.forEach((u) => users.add(u));
+      delta.removed.forEach((u) => users.delete(u));
+      dispatchUsers();
+    };
+    wsProvider.awareness.on('update', onUpdate);
+    dispatchUsers();
+    this._awarenessOff = () => {
+      wsProvider.awareness.off('update', onUpdate);
+      this._awarenessOff = null;
+    };
+  }
+
   async _loadEditor() {
     if (!this._canLoad) return;
 
     const sourceUrl = this._sourceUrl;
 
+    if (this._awarenessOff) {
+      this._awarenessOff();
+      this._awarenessOff = null;
+    }
     if (this._wsProvider) {
       this._wsProvider.disconnect({ data: 'Path changed' });
       this._wsProvider = undefined;
     }
+    this.dispatchEvent(new CustomEvent('da-collab-users', { bubbles: true, composed: true, detail: { users: [] } }));
     if (this._proseEl && this._proseEl.parentNode) {
       this._proseEl.remove();
     }
@@ -129,6 +179,7 @@ export default class DaInlineEditor extends LitElement {
 
       this._proseEl = proseEl;
       this._wsProvider = wsProvider;
+      this._setupAwarenessUpdates(wsProvider);
     } catch (e) {
       this._error = e?.message || 'Failed to load editor';
       this._proseEl = null;
@@ -158,6 +209,10 @@ export default class DaInlineEditor extends LitElement {
   }
 
   disconnectedCallback() {
+    if (this._awarenessOff) {
+      this._awarenessOff();
+      this._awarenessOff = null;
+    }
     if (this._wsProvider) {
       this._wsProvider.disconnect({ data: 'Component unmount' });
       this._wsProvider = undefined;
