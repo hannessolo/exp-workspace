@@ -105,6 +105,18 @@
   flex-shrink: 0;
 }
 
+.space .space-publish-menu-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.space .space-publish-spinner {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
 .space .space-nav-toggle-btn {
   flex-shrink: 0;
 }

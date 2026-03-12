@@ -3,6 +3,8 @@ import getStyle from 'https://da.live/nx/utils/styles.js';
 // eslint-disable-next-line import/no-unresolved
 import { LitElement, html } from 'da-lit';
 // eslint-disable-next-line import/no-unresolved
+import DA_SDK from 'https://da.live/nx/utils/sdk.js';
+// eslint-disable-next-line import/no-unresolved
 import '../../src/chat/chat.js';
 // eslint-disable-next-line import/no-unresolved
 import '../../src/file-browser/file-browser.js';
@@ -10,6 +12,33 @@ import '../../src/page-outline/page-outline.js';
 import './da-inline-editor.js';
 
 const style = await getStyle(import.meta.url);
+const { token } = await DA_SDK;
+
+const AEM_ORIGIN = 'https://admin.hlx.page';
+
+/**
+ * POST to AEM admin to preview or publish. Same contract as da-title in da-live.
+ * @param {string} path - Full pathname e.g. /org/site/path/to/page
+ * @param {'preview'|'live'} action
+ * @returns {Promise<{ preview?: { url: string }, live?: { url: string }, error?: object }>}
+ */
+async function saveToAem(path, action) {
+  const [owner, repo, ...parts] = path.slice(1).toLowerCase().split('/');
+  const aemPath = parts.join('/');
+  const url = `${AEM_ORIGIN}/${action}/${owner}/${repo}/main/${aemPath}`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'x-content-source-authorization': `Bearer ${token}`,
+    },
+  });
+  if (!resp.ok) {
+    const xError = resp.headers.get('x-error');
+    return { error: { status: resp.status, message: xError || resp.statusText } };
+  }
+  return resp.json();
+}
 
 /**
  * Parse hash to get org and repo. Hash format: #/org/site or #/org/site/path
@@ -33,6 +62,7 @@ class Space extends LitElement {
     _viewMode: { state: true },
     _chatOpen: { state: true },
     _detailsOpen: { state: true },
+    _publishLoading: { state: true },
   };
 
   constructor() {
@@ -41,9 +71,10 @@ class Space extends LitElement {
     this._selectedPath = '';
     this._orgRepo = null;
     this._sidebarTab = 'files';
-    this._viewMode = 'split';
+    this._viewMode = 'wysiwyg';
     this._chatOpen = true;
     this._detailsOpen = true;
+    this._publishLoading = false;
   }
 
   _boundHashChange = () => {
@@ -91,6 +122,57 @@ class Space extends LitElement {
     // eslint-disable-next-line no-console
     console.error('[da-space] WYSIWYG iframe error', this._wysiwygIframeSrc);
   };
+
+  /** @returns {string | null} Full path for AEM (e.g. /org/site/path) or null */
+  _getPathForAem() {
+    const raw = (this._selectedPath || '').replace(/^\//, '') || (this._orgRepo ? `${this._orgRepo.org}/${this._orgRepo.repo}` : '');
+    if (!raw) return null;
+    const path = `/${raw}`;
+    const segments = path.slice(1).split('/').filter(Boolean);
+    return segments.length >= 2 ? path : null;
+  }
+
+  async _onPreview() {
+    const path = this._getPathForAem();
+    if (!path) return;
+    this._publishLoading = true;
+    try {
+      const json = await saveToAem(path, 'preview');
+      if (json.error) {
+        // eslint-disable-next-line no-console
+        console.error('[da-space] Preview failed', json.error);
+        return;
+      }
+      const href = json.preview?.url;
+      if (href) window.open(`${href}?nocache=${Date.now()}`, href);
+    } finally {
+      this._publishLoading = false;
+    }
+  }
+
+  async _onPublish() {
+    const path = this._getPathForAem();
+    if (!path) return;
+    this._publishLoading = true;
+    try {
+      let json = await saveToAem(path, 'preview');
+      if (json.error) {
+        // eslint-disable-next-line no-console
+        console.error('[da-space] Preview (before publish) failed', json.error);
+        return;
+      }
+      json = await saveToAem(path, 'live');
+      if (json.error) {
+        // eslint-disable-next-line no-console
+        console.error('[da-space] Publish failed', json.error);
+        return;
+      }
+      const href = json.live?.url;
+      if (href) window.open(`${href}?nocache=${Date.now()}`, href);
+    } finally {
+      this._publishLoading = false;
+    }
+  }
 
   connectedCallback() {
     super.connectedCallback();
@@ -183,9 +265,12 @@ class Space extends LitElement {
   _renderPublishMenu() {
     return html`
       <sp-action-menu label="Publish menu" class="space-publish-menu-trigger">
-        ${this._renderPlayIcon()}
-        <sp-menu-item>Preview</sp-menu-item>
-        <sp-menu-item>Publish</sp-menu-item>
+        <span class="space-publish-menu-content" slot="icon">
+          ${this._publishLoading ? html`<sp-progress-circle class="space-publish-spinner" indeterminate size="s" aria-label="Loading"></sp-progress-circle>` : ''}
+          ${this._renderPlayIcon()}
+        </span>
+        <sp-menu-item @click="${this._onPreview}">Preview</sp-menu-item>
+        <sp-menu-item @click="${this._onPublish}">Publish</sp-menu-item>
       </sp-action-menu>
     `;
   }
