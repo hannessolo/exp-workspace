@@ -7,7 +7,8 @@
     "lint:js": "eslint .",
     "lint:css": "stylelint \"blocks/**/*.css\" \"styles/*.css\"",
     "lint": "npm run lint:js && npm run lint:css",
-    "lint:fix": "npm run lint:js -- --fix && npm run lint:css -- --fix"
+    "lint:fix": "npm run lint:js -- --fix && npm run lint:css -- --fix",
+    "build:swc": "esbuild --format=esm --minify ./deps/swc.js --bundle --outfile=./deps/dist/swc.js"
   },
   "repository": {
     "type": "git",
@@ -26,5 +27,13 @@
     "eslint-plugin-import": "2.32.0",
     "stylelint": "17.4.0",
     "stylelint-config-standard": "40.0.0"
+  },
+  "dependencies": {
+    "@spectrum-web-components/asset": "^1.11.2",
+    "@spectrum-web-components/button": "^1.11.2",
+    "@spectrum-web-components/split-view": "^1.11.2",
+    "@spectrum-web-components/textfield": "^1.11.2",
+    "@spectrum-web-components/theme": "^1.11.2",
+    "esbuild": "^0.21.0"
   }
 }
