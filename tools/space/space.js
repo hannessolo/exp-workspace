@@ -93,70 +93,27 @@ class Space extends LitElement {
           class="split-view split-view-outer"
           resizable
           collapsible
-          primary-size="230"
+          primary-size="25%"
+          primary-min="280"
           secondary-min="400"
-          label="Resize file browser"
+          label="Resize chat panel"
         >
-          <div class="space-sidebar">
-            <div class="space-sidebar-tablist" role="tablist" aria-label="Sidebar">
-              <button
-                type="button"
-                role="tab"
-                class="space-sidebar-tab"
-                aria-selected="${this._sidebarTab === 'files'}"
-                aria-controls="space-sidebar-panel-files"
-                id="space-sidebar-tab-files"
-                @click="${() => { this._sidebarTab = 'files'; }}"
-              >Files</button>
-              <button
-                type="button"
-                role="tab"
-                class="space-sidebar-tab"
-                aria-selected="${this._sidebarTab === 'outline'}"
-                aria-controls="space-sidebar-panel-outline"
-                id="space-sidebar-tab-outline"
-                @click="${() => { this._sidebarTab = 'outline'; }}"
-              >Outline</button>
-            </div>
-            <div
-              id="space-sidebar-panel-files"
-              role="tabpanel"
-              aria-labelledby="space-sidebar-tab-files"
-              class="space-sidebar-panel"
-              ?hidden="${this._sidebarTab !== 'files'}"
-            >
-              <da-file-browser class="space-file-browser"></da-file-browser>
-            </div>
-            <div
-              id="space-sidebar-panel-outline"
-              role="tabpanel"
-              aria-labelledby="space-sidebar-tab-outline"
-              class="space-sidebar-panel"
-              ?hidden="${this._sidebarTab !== 'outline'}"
-            >
-              <da-page-outline
-                class="space-page-outline"
-                .selectedPath="${this._selectedPath ?? ''}"
-                .org="${this._orgRepo?.org ?? ''}"
-                .repo="${this._orgRepo?.repo ?? ''}"
-              ></da-page-outline>
-            </div>
-          </div>
+          <da-chat class="space-chat-panel"></da-chat>
           <sp-split-view
             class="split-view split-view-inner"
             resizable
             collapsible
             primary-size="70%"
-            secondary-min="320"
-            label="Resize main and chat panels"
+            secondary-min="200"
+            label="Resize main and file browser panels"
           >
             <div class="inner-primary-wrap">
               <sp-split-view
                 class="split-view split-view-main"
                 resizable
                 collapsible
-                primary-size="50%"
-                secondary-min="200"
+                primary-size="100%"
+                secondary-min="150"
                 label="Resize doc and wysiwyg panels"
               >
                 <div class="main-pane main-pane-doc">
@@ -187,7 +144,51 @@ class Space extends LitElement {
                 </div>
               </sp-split-view>
             </div>
-            <da-chat class="space-chat-panel"></da-chat>
+            <div class="space-sidebar">
+              <div class="space-sidebar-tablist" role="tablist" aria-label="Sidebar">
+                <button
+                  type="button"
+                  role="tab"
+                  class="space-sidebar-tab"
+                  aria-selected="${this._sidebarTab === 'files'}"
+                  aria-controls="space-sidebar-panel-files"
+                  id="space-sidebar-tab-files"
+                  @click="${() => { this._sidebarTab = 'files'; }}"
+                >Files</button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="space-sidebar-tab"
+                  aria-selected="${this._sidebarTab === 'outline'}"
+                  aria-controls="space-sidebar-panel-outline"
+                  id="space-sidebar-tab-outline"
+                  @click="${() => { this._sidebarTab = 'outline'; }}"
+                >Outline</button>
+              </div>
+              <div
+                id="space-sidebar-panel-files"
+                role="tabpanel"
+                aria-labelledby="space-sidebar-tab-files"
+                class="space-sidebar-panel"
+                ?hidden="${this._sidebarTab !== 'files'}"
+              >
+                <da-file-browser class="space-file-browser"></da-file-browser>
+              </div>
+              <div
+                id="space-sidebar-panel-outline"
+                role="tabpanel"
+                aria-labelledby="space-sidebar-tab-outline"
+                class="space-sidebar-panel"
+                ?hidden="${this._sidebarTab !== 'outline'}"
+              >
+                <da-page-outline
+                  class="space-page-outline"
+                  .selectedPath="${this._selectedPath ?? ''}"
+                  .org="${this._orgRepo?.org ?? ''}"
+                  .repo="${this._orgRepo?.repo ?? ''}"
+                ></da-page-outline>
+              </div>
+            </div>
           </sp-split-view>
         </sp-split-view>
       </div>
