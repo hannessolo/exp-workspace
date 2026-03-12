@@ -205,7 +205,7 @@ class FileBrowser extends LitElement {
 
     if (isDir) {
       const onClick = () => {
-        if (hasChildren && expanded) {
+        if (hasChildren) {
           this._toggle(path);
         } else {
           this._navigateToPath(item.path || item.pathKey);
@@ -221,10 +221,12 @@ class FileBrowser extends LitElement {
             aria-expanded="${hasChildren ? expanded : undefined}"
             aria-label="${expanded ? 'Collapse' : 'Expand'} ${item.name}"
           >
-            <span class="file-browser-chevron" aria-hidden="true">
-              ${hasChildren ? (expanded ? '▼' : '▶') : ' '}
+            <span class="file-browser-chevron ${hasChildren && expanded ? 'file-browser-chevron-expanded' : ''}" aria-hidden="true">
+              ${hasChildren
+                ? html`<sp-icon-chevron200 size="s"></sp-icon-chevron200>`
+                : html`<span class="file-browser-chevron-placeholder"></span>`}
             </span>
-            <sp-asset variant="folder" class="file-browser-icon"></sp-asset>
+            <sp-icon-folder size="s" class="file-browser-icon"></sp-icon-folder>
             <span class="file-browser-label">${item.name}</span>
           </button>
           ${hasChildren && expanded
@@ -247,8 +249,10 @@ class FileBrowser extends LitElement {
           @click="${() => { console.log('[da-file-browser] file row clicked', path); this._select(item, path); }}"
           aria-label="Open ${item.name}"
         >
-          <span class="file-browser-chevron" aria-hidden="true"> </span>
-          <sp-asset variant="file" class="file-browser-icon"></sp-asset>
+          <span class="file-browser-chevron" aria-hidden="true">
+            <span class="file-browser-chevron-placeholder"></span>
+          </span>
+          <sp-icon-file size="s" class="file-browser-icon"></sp-icon-file>
           <span class="file-browser-label">${item.name}</span>
         </button>
       </div>

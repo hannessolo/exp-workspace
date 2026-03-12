@@ -78,7 +78,7 @@ class Space extends LitElement {
           class="split-view split-view-outer"
           resizable
           collapsible
-          primary-size="20%"
+          primary-size="230"
           secondary-min="400"
           label="Resize file browser"
         >

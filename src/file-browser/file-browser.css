@@ -58,11 +58,26 @@
 }
 
 .file-browser .file-browser-chevron {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 0.75rem;
   flex-shrink: 0;
-  font-size: 0.5rem;
   color: #6b6b6b;
+}
+
+.file-browser .file-browser-chevron sp-icon-chevron200 {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+.file-browser .file-browser-chevron.file-browser-chevron-expanded sp-icon-chevron200 {
+  transform: rotate(90deg);
+}
+
+.file-browser .file-browser-chevron-placeholder {
+  display: inline-block;
+  width: 0.75rem;
 }
 
 .file-browser .file-browser-icon {
