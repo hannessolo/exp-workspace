@@ -67,7 +67,6 @@
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
-  -webkit-appearance: none;
   appearance: none;
 }
 

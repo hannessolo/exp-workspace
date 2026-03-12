@@ -42,15 +42,15 @@ class Space extends LitElement {
 
   _boundHashChange = () => {
     this._orgRepo = getOrgRepoFromHash();
+    const hash = window.location.hash || '';
+    const path = hash.replace(/^#\/?/, '').trim();
+    const pathSegments = path ? path.split('/').filter(Boolean) : [];
+    this._selectedPath = pathSegments.length > 2 ? path : '';
   };
 
   _boundFileSelect = (e) => {
-    // eslint-disable-next-line no-console
-    console.log('[da-space] da-file-browser-select received', e.type, e.detail);
     const path = e.detail?.item?.path;
     this._selectedPath = typeof path === 'string' ? path.replace(/^\//, '') : '';
-    // eslint-disable-next-line no-console
-    console.log('[da-space] _selectedPath set to', this._selectedPath);
   };
 
   /* eslint-disable-next-line class-methods-use-this */
@@ -64,7 +64,7 @@ class Space extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.shadowRoot.adoptedStyleSheets = [style];
-    this._orgRepo = getOrgRepoFromHash();
+    this._boundHashChange();
     window.addEventListener('hashchange', this._boundHashChange);
     this.addEventListener('da-file-browser-select', this._boundFileSelect);
   }

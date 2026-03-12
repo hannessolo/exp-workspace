@@ -5,7 +5,8 @@ import { LitElement, html } from 'da-lit';
 // eslint-disable-next-line import/no-unresolved
 import DA_SDK from 'https://da.live/nx/utils/sdk.js';
 
-const { token } = await DA_SDK;
+const { token, actions } = await DA_SDK;
+const setHash = actions?.setHash;
 
 const style = await getStyle(import.meta.url);
 
@@ -147,11 +148,15 @@ class FileBrowser extends LitElement {
     if (!pathInfo) {
       this._hashPath = null;
       this._expanded = new Set();
+      this.selectedPath = '';
       this._error = null;
       return;
     }
     const { pathSegments } = pathInfo;
     this._hashPath = pathInfo;
+    this.selectedPath = pathSegments.length > 2
+      ? pathInfo.fullpath.replace(/^\//, '')
+      : '';
     const rootFullpath = `/${pathSegments.slice(0, 2).join('/')}`;
     const ancestorPaths = [];
     for (let i = 2; i <= pathSegments.length; i += 1) {
@@ -187,7 +192,12 @@ class FileBrowser extends LitElement {
   /* eslint-disable-next-line class-methods-use-this */
   _navigateToPath(pathKeyOrPath) {
     const normalized = pathKeyOrPath.startsWith('/') ? pathKeyOrPath.slice(1) : pathKeyOrPath;
-    window.location.hash = `/${normalized}`;
+    const newHash = `#/${normalized}`;
+    if (setHash) {
+      setHash(newHash);
+    } else {
+      window.location.hash = `/${normalized}`;
+    }
   }
 
   _toggle(path) {
@@ -198,12 +208,9 @@ class FileBrowser extends LitElement {
   }
 
   _select(item, path) {
-    // eslint-disable-next-line no-console
-    console.log('[da-file-browser] file clicked', { item, path });
     this.selectedPath = path;
+    this._navigateToPath(path);
     const detail = { item: { ...item, path } };
-    // eslint-disable-next-line no-console
-    console.log('[da-file-browser] dispatching da-file-browser-select', detail);
     this.dispatchEvent(
       new CustomEvent('da-file-browser-select', {
         detail,
