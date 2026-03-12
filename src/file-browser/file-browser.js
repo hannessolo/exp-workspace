@@ -207,6 +207,31 @@ class FileBrowser extends LitElement {
     this._expanded = next;
   }
 
+  /**
+   * Load a folder's contents and expand it without updating the hash.
+   * @param {string} pathKeyOrFullpath - e.g. org/site/folder or /org/site/folder
+   */
+  async _loadAndExpandFolder(pathKeyOrFullpath) {
+    const pathKey = pathKeyOrFullpath.startsWith('/') ? pathKeyOrFullpath.slice(1) : pathKeyOrFullpath;
+    const fullpath = `/${pathKey}`;
+    if (this._cache[fullpath]) {
+      this._toggle(pathKey);
+      return;
+    }
+    this._loading = true;
+    try {
+      const items = await fetchList(fullpath);
+      this._cache = { ...this._cache, [fullpath]: items };
+      this._expanded = new Set(this._expanded);
+      this._expanded.add(pathKey);
+      this._error = null;
+    } catch (e) {
+      this._error = e.message || 'Failed to load';
+    } finally {
+      this._loading = false;
+    }
+  }
+
   _select(item, path) {
     this.selectedPath = path;
     this._navigateToPath(path);
@@ -228,11 +253,11 @@ class FileBrowser extends LitElement {
     const selected = this.selectedPath === path;
 
     if (isDir) {
-      const onClick = () => {
+      const onFolderClick = () => {
         if (hasChildren) {
           this._toggle(path);
         } else {
-          this._navigateToPath(item.path || item.pathKey);
+          this._loadAndExpandFolder(item.path || item.pathKey);
         }
       };
       return html`
@@ -241,7 +266,7 @@ class FileBrowser extends LitElement {
             type="button"
             class="file-browser-row ${selected ? 'file-browser-row-selected' : ''}"
             style="padding-left: ${0.5 + depth * 1}rem"
-            @click="${onClick}"
+            @click="${onFolderClick}"
             aria-expanded="${hasChildren ? expanded : undefined}"
             aria-label="${expanded ? 'Collapse' : 'Expand'} ${item.name}"
           >

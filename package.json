@@ -29,6 +29,8 @@
     "stylelint-config-standard": "40.0.0"
   },
   "dependencies": {
+    "@spectrum-web-components/action-group": "^1.11.2",
+    "@spectrum-web-components/action-menu": "^1.11.2",
     "@spectrum-web-components/asset": "^1.11.2",
     "@spectrum-web-components/button": "^1.11.2",
     "@spectrum-web-components/split-view": "^1.11.2",
