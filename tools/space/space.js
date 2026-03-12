@@ -2,9 +2,11 @@
 import getStyle from 'https://da.live/nx/utils/styles.js';
 // eslint-disable-next-line import/no-unresolved
 import { LitElement, html } from 'da-lit';
-import '/src/chat/chat.js';
-import '/src/file-browser/file-browser.js';
-import '/tools/space/da-inline-editor.js';
+// eslint-disable-next-line import/no-unresolved
+import '../../src/chat/chat.js';
+// eslint-disable-next-line import/no-unresolved
+import '../../src/file-browser/file-browser.js';
+import './da-inline-editor.js';
 
 const style = await getStyle(import.meta.url);
 
@@ -40,10 +42,20 @@ class Space extends LitElement {
   };
 
   _boundFileSelect = (e) => {
+    // eslint-disable-next-line no-console
     console.log('[da-space] da-file-browser-select received', e.type, e.detail);
     const path = e.detail?.item?.path;
     this._selectedPath = typeof path === 'string' ? path.replace(/^\//, '') : '';
+    // eslint-disable-next-line no-console
     console.log('[da-space] _selectedPath set to', this._selectedPath);
+  };
+
+  /* eslint-disable-next-line class-methods-use-this */
+  _onWysiwygIframeLoad = () => { /* iframe loaded */ };
+
+  _onWysiwygIframeError = () => {
+    // eslint-disable-next-line no-console
+    console.error('[da-space] WYSIWYG iframe error', this._wysiwygIframeSrc);
   };
 
   connectedCallback() {
@@ -114,14 +126,14 @@ class Space extends LitElement {
                   <span class="main-pane-label">WYSIWYG</span>
                   <div class="main-pane-wysiwyg-iframe-wrap">
                     ${iframeSrc
-                      ? html`<iframe
+    ? html`<iframe
                           title="WYSIWYG preview"
                           src="${iframeSrc}"
                           class="main-pane-wysiwyg-iframe"
-                          @load="${() => { console.log('[da-space] WYSIWYG iframe load', iframeSrc); }}"
-                          @error="${() => { console.error('[da-space] WYSIWYG iframe error', iframeSrc); }}"
+                          @load="${this._onWysiwygIframeLoad}"
+                          @error="${this._onWysiwygIframeError}"
                         ></iframe>`
-                      : html`<div class="main-pane-wysiwyg-placeholder">
+    : html`<div class="main-pane-wysiwyg-placeholder">
                           Select a file and set hash to <code>#/org/site</code> to preview.
                         </div>`}
                   </div>

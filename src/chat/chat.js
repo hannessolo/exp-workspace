@@ -66,14 +66,14 @@ class Chat extends LitElement {
         <div class="chat-header">${this.header}</div>
         <div class="chat-messages" role="log" aria-live="polite">
           ${this.messages.length === 0
-            ? html`<div class="chat-empty">No messages yet.</div>`
-            : this.messages.map(
-                (m) => html`
+    ? html`<div class="chat-empty">No messages yet.</div>`
+    : this.messages.map(
+      (m) => html`
                   <div class="chat-message ${m.self ? 'chat-message-self' : ''}">
                     ${m.text}
                   </div>
                 `,
-              )}
+    )}
         </div>
         <div class="chat-footer">
           <sp-textfield

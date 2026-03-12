@@ -7,12 +7,18 @@
 import getStyle from 'https://da.live/nx/utils/styles.js';
 // eslint-disable-next-line import/no-unresolved
 import { LitElement, html } from 'da-lit';
+// eslint-disable-next-line import/no-unresolved
 import DA_SDK from 'https://da.live/nx/utils/sdk.js';
+// eslint-disable-next-line import/no-unresolved
 import { DA_ORIGIN } from 'https://da.live/blocks/shared/constants.js';
 import initProse from './prose-inline.js';
 
 const style = await getStyle(import.meta.url);
 const { token } = await DA_SDK;
+
+function afterRender(cb) {
+  Promise.resolve().then(() => requestAnimationFrame(cb));
+}
 
 function buildSourceUrl(path) {
   if (!path || typeof path !== 'string') return null;
@@ -203,10 +209,6 @@ export default class DaInlineEditor extends LitElement {
       </div>
     `;
   }
-}
-
-function afterRender(cb) {
-  Promise.resolve().then(() => requestAnimationFrame(cb));
 }
 
 customElements.define('da-inline-editor', DaInlineEditor);

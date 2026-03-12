@@ -2,13 +2,13 @@
  * Minimal ProseMirror + Yjs collab. Same shape as da-nx quick-edit-portal prose.js.
  * Uses getToken for WebSocket auth (no adobeIMS). No preview, no da-title, no edit plugins.
  */
+/* eslint-disable import/no-unresolved */
 import {
   EditorState,
   EditorView,
   fixTables,
   keymap,
   baseKeymap,
-  Plugin,
   Y,
   WebsocketProvider,
   ySyncPlugin,
@@ -18,6 +18,7 @@ import {
 
 import { getSchema } from 'da-parser';
 import { COLLAB_ORIGIN, DA_ORIGIN } from 'https://da.live/blocks/shared/constants.js';
+/* eslint-enable import/no-unresolved */
 
 function registerErrorHandler(ydoc) {
   ydoc.on('update', () => {
@@ -65,10 +66,13 @@ function addSyncedListener(wsProvider, canWrite, setEditable) {
 /**
  * Initialize minimal ProseMirror + Yjs for the given document path.
  * getToken: () => token — used for WebSocket auth; required (no adobeIMS).
- * @param {{ path: string, permissions: string[], setEditable?: (editable: boolean) => void, getToken?: () => string }} opts
+ * @param {{ path: string, permissions: string[], setEditable?: (editable: boolean) => void,
+ *   getToken?: () => string }} opts
  * @returns {{ proseEl: HTMLElement, wsProvider: WebsocketProvider }}
  */
-export default function initProse({ path, permissions, setEditable, getToken }) {
+export default function initProse({
+  path, permissions, setEditable, getToken,
+}) {
   if (window.view) {
     window.view.destroy();
     delete window.view;

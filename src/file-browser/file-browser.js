@@ -2,8 +2,9 @@
 import getStyle from 'https://da.live/nx/utils/styles.js';
 // eslint-disable-next-line import/no-unresolved
 import { LitElement, html } from 'da-lit';
-
+// eslint-disable-next-line import/no-unresolved
 import DA_SDK from 'https://da.live/nx/utils/sdk.js';
+
 const { token } = await DA_SDK;
 
 const style = await getStyle(import.meta.url);
@@ -39,12 +40,14 @@ async function fetchList(fullpath) {
       },
     });
     if (!resp.ok) {
+      // eslint-disable-next-line no-console
       console.error('[da-file-browser] fetchList failed', { url, status: resp.status, statusText: resp.statusText });
       throw new Error(`List failed: ${resp.status}`);
     }
     const json = await resp.json();
     return Array.isArray(json) ? json : json?.items || [];
   } catch (e) {
+    // eslint-disable-next-line no-console
     console.error('[da-file-browser] fetchList error', { url, message: e?.message, cause: e?.cause });
     throw e;
   }
@@ -57,7 +60,9 @@ function listItemToNode(item, cache) {
   const path = (item.path || '').replace(/^\//, '');
   const fullpath = `/${path}`;
   const isDir = !item.ext;
-  const children = isDir && cache[fullpath] ? cache[fullpath].map((child) => listItemToNode(child, cache)) : [];
+  const children = isDir && cache[fullpath]
+    ? cache[fullpath].map((child) => listItemToNode(child, cache))
+    : [];
   return {
     name: item.name,
     type: item.ext ? 'file' : 'directory',
@@ -70,13 +75,20 @@ function listItemToNode(item, cache) {
 }
 
 /**
- * Build tree from cache: single root (org/site), children from cache; folders get nested from cache.
+ * Build tree from cache: single root (org/site), children from cache;
+ * folders get nested from cache.
  */
-function buildTreeFromCache(cache, rootFullpath, currentFullpath) {
+function buildTreeFromCache(cache, rootFullpath) {
   const rootPathKey = rootFullpath.replace(/^\//, '');
   const listItems = cache[rootFullpath];
   if (!listItems || listItems.length === 0) {
-    return [{ name: rootPathKey.split('/').pop(), type: 'directory', pathKey: rootPathKey, path: rootFullpath, children: [] }];
+    return [{
+      name: rootPathKey.split('/').pop(),
+      type: 'directory',
+      pathKey: rootPathKey,
+      path: rootFullpath,
+      children: [],
+    }];
   }
   const root = [{
     name: rootPathKey.split('/').pop(),
@@ -91,7 +103,8 @@ function buildTreeFromCache(cache, rootFullpath, currentFullpath) {
 /**
  * File browser component: tree of files and directories driven by hash URL (org/site/path)
  * and DA list API. Use from any host (e.g. space) by placing <da-file-browser></da-file-browser>.
- * @fires da-file-browser-select - when user selects a file (detail: { item: { name, type, path? } })
+ * @fires da-file-browser-select - when user selects a file
+ * (detail: { item: { name, type, path? } })
  */
 class FileBrowser extends LitElement {
   static properties = {
@@ -137,7 +150,7 @@ class FileBrowser extends LitElement {
       this._error = null;
       return;
     }
-    const { pathSegments, fullpath } = pathInfo;
+    const { pathSegments } = pathInfo;
     this._hashPath = pathInfo;
     const rootFullpath = `/${pathSegments.slice(0, 2).join('/')}`;
     const ancestorPaths = [];
@@ -145,7 +158,7 @@ class FileBrowser extends LitElement {
       ancestorPaths.push(`/${pathSegments.slice(0, i).join('/')}`);
     }
     this._expanded = new Set(
-      [rootFullpath.replace(/^\//, ''), ...ancestorPaths.map((p) => p.replace(/^\//, ''))]
+      [rootFullpath.replace(/^\//, ''), ...ancestorPaths.map((p) => p.replace(/^\//, ''))],
     );
     this._error = null;
     this._loading = true;
@@ -156,7 +169,7 @@ class FileBrowser extends LitElement {
         toFetch.map(async (p) => {
           const items = await fetchList(p);
           cache[p] = items;
-        })
+        }),
       );
       this._cache = cache;
     } catch (e) {
@@ -166,10 +179,12 @@ class FileBrowser extends LitElement {
     }
   }
 
+  /* eslint-disable-next-line class-methods-use-this */
   _path(parentPath, name) {
     return parentPath ? `${parentPath}/${name}` : name;
   }
 
+  /* eslint-disable-next-line class-methods-use-this */
   _navigateToPath(pathKeyOrPath) {
     const normalized = pathKeyOrPath.startsWith('/') ? pathKeyOrPath.slice(1) : pathKeyOrPath;
     window.location.hash = `/${normalized}`;
@@ -183,16 +198,18 @@ class FileBrowser extends LitElement {
   }
 
   _select(item, path) {
+    // eslint-disable-next-line no-console
     console.log('[da-file-browser] file clicked', { item, path });
     this.selectedPath = path;
     const detail = { item: { ...item, path } };
+    // eslint-disable-next-line no-console
     console.log('[da-file-browser] dispatching da-file-browser-select', detail);
     this.dispatchEvent(
       new CustomEvent('da-file-browser-select', {
         detail,
         bubbles: true,
         composed: true,
-      })
+      }),
     );
   }
 
@@ -223,19 +240,19 @@ class FileBrowser extends LitElement {
           >
             <span class="file-browser-chevron ${hasChildren && expanded ? 'file-browser-chevron-expanded' : ''}" aria-hidden="true">
               ${hasChildren
-                ? html`<sp-icon-chevron200 size="s"></sp-icon-chevron200>`
-                : html`<span class="file-browser-chevron-placeholder"></span>`}
+    ? html`<sp-icon-chevron200 size="s"></sp-icon-chevron200>`
+    : html`<span class="file-browser-chevron-placeholder"></span>`}
             </span>
             <sp-icon-folder size="s" class="file-browser-icon"></sp-icon-folder>
             <span class="file-browser-label">${item.name}</span>
           </button>
           ${hasChildren && expanded
-            ? html`
+    ? html`
                 <div class="file-browser-children">
                   ${item.children.map((child) => this._renderItem(child, depth + 1, path))}
                 </div>
               `
-            : ''}
+    : ''}
         </div>
       `;
     }
@@ -246,7 +263,7 @@ class FileBrowser extends LitElement {
           type="button"
           class="file-browser-row ${selected ? 'file-browser-row-selected' : ''}"
           style="padding-left: ${0.5 + depth * 1}rem"
-          @click="${() => { console.log('[da-file-browser] file row clicked', path); this._select(item, path); }}"
+          @click="${() => { this._select(item, path); }}"
           aria-label="Open ${item.name}"
         >
           <span class="file-browser-chevron" aria-hidden="true">
@@ -264,27 +281,27 @@ class FileBrowser extends LitElement {
       ? `/${this._hashPath.pathSegments.slice(0, 2).join('/')}`
       : '';
     const items = this._hashPath && rootFullpath
-      ? buildTreeFromCache(this._cache, rootFullpath, this._hashPath.fullpath)
+      ? buildTreeFromCache(this._cache, rootFullpath)
       : [];
     return html`
       <div class="file-browser">
         <div class="file-browser-header">${this.header}</div>
         ${this._error
-          ? html`<div class="file-browser-error" role="alert">${this._error}</div>`
-          : ''}
+    ? html`<div class="file-browser-error" role="alert">${this._error}</div>`
+    : ''}
         ${this._loading && items.length === 0
-          ? html`<div class="file-browser-loading">Loading…</div>`
-          : ''}
+    ? html`<div class="file-browser-loading">Loading…</div>`
+    : ''}
         <div class="file-browser-tree" role="tree" aria-label="${this.header}">
           ${items.map((item) => this._renderItem(item, 0, ''))}
         </div>
         ${!this._hashPath
-          ? html`
+    ? html`
               <div class="file-browser-hint">
                 Set URL hash to <code>#/org/site</code> or <code>#/org/site/path</code> to browse.
               </div>
             `
-          : ''}
+    : ''}
       </div>
     `;
   }
