@@ -65,6 +65,7 @@ class Space extends LitElement {
     _publishLoading: { state: true },
     _collabUsers: { state: true },
     _quickEditPort: { state: true },
+    _wysiwygCookieReady: { state: true },
   };
 
   constructor() {
@@ -79,6 +80,8 @@ class Space extends LitElement {
     this._publishLoading = false;
     this._collabUsers = [];
     this._quickEditPort = null;
+    this._wysiwygCookieReady = false;
+    this._wysiwygCookieRequestKey = null;
   }
 
   _boundCollabUsers = (e) => {
@@ -190,6 +193,30 @@ class Space extends LitElement {
     console.error('[da-space] WYSIWYG iframe error', this._wysiwygIframeSrc);
   };
 
+  /**
+   * Fetches gimme_cookie for the preview domain so the iframe can load with auth.
+   * @param {string} requestKey - `${org}/${repo}` to ignore stale responses
+   * @returns {Promise<void>}
+   */
+  async _fetchWysiwygCookie(requestKey) {
+    if (!this._orgRepo || requestKey !== this._wysiwygCookieRequestKey) return;
+    const { org, repo } = this._orgRepo;
+    const url = `https://main--${repo}--${org}.preview.da.live/gimme_cookie`;
+    const resp = await fetch(url, {
+      method: 'GET',
+      credentials: 'include',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (!resp.ok) {
+      throw new Error(`gimme_cookie failed: ${resp.status} ${resp.statusText}`);
+    }
+    if (this._wysiwygCookieRequestKey === requestKey) {
+      this._wysiwygCookieReady = true;
+    }
+  }
+
   /** @returns {string | null} Full path for AEM (e.g. /org/site/path) or null */
   _getPathForAem() {
     const raw = (this._selectedPath || '').replace(/^\//, '') || (this._orgRepo ? `${this._orgRepo.org}/${this._orgRepo.repo}` : '');
@@ -259,6 +286,21 @@ class Space extends LitElement {
         this._quickEditInitRetryId = null;
       }
     }
+    if (changed.has('_orgRepo') || changed.has('_selectedPath')) {
+      if (!this._orgRepo || !this._selectedPath) {
+        this._wysiwygCookieReady = false;
+        this._wysiwygCookieRequestKey = null;
+        return;
+      }
+      const { org, repo } = this._orgRepo;
+      const requestKey = `${org}/${repo}`;
+      this._wysiwygCookieReady = false;
+      this._wysiwygCookieRequestKey = requestKey;
+      this._fetchWysiwygCookie(requestKey).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.error('[da-space] gimme_cookie failed', err);
+      });
+    }
   }
 
   disconnectedCallback() {
@@ -269,7 +311,7 @@ class Space extends LitElement {
   }
 
   get _wysiwygIframeSrc() {
-    if (!this._orgRepo || !this._selectedPath) return null;
+    if (!this._orgRepo || !this._selectedPath || !this._wysiwygCookieReady) return null;
     const { org, repo } = this._orgRepo;
     const segments = this._selectedPath.split('/');
     const pathWithoutOrgRepo = segments.slice(2).join('/');
@@ -296,6 +338,13 @@ class Space extends LitElement {
   }
 
   _renderWysiwygPane(iframeSrc) {
+    const hasPath = this._orgRepo && this._selectedPath;
+    const waitingForCookie = hasPath && !this._wysiwygCookieReady;
+    const placeholder = waitingForCookie
+      ? html`<div class="main-pane-wysiwyg-placeholder">Loading preview…</div>`
+      : html`<div class="main-pane-wysiwyg-placeholder">
+          Select a file and set hash to <code>#/org/site</code> to preview.
+        </div>`;
     return html`
       <div class="main-pane main-pane-wysiwyg">
         <span class="main-pane-label">WYSIWYG</span>
@@ -306,9 +355,7 @@ class Space extends LitElement {
             class="main-pane-wysiwyg-iframe"
             @load="${this._onWysiwygIframeLoad}"
             @error="${this._onWysiwygIframeError}"
-          ></iframe>` : html`<div class="main-pane-wysiwyg-placeholder">
-            Select a file and set hash to <code>#/org/site</code> to preview.
-          </div>`}
+          ></iframe>` : placeholder}
         </div>
       </div>
     `;
