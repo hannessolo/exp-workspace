@@ -9,6 +9,7 @@ import {
   fixTables,
   keymap,
   baseKeymap,
+  Plugin,
   Y,
   WebsocketProvider,
   ySyncPlugin,
@@ -18,7 +19,36 @@ import {
 
 import { getSchema } from 'da-parser';
 import { COLLAB_ORIGIN, DA_ORIGIN } from 'https://da.live/blocks/shared/constants.js';
+import { findChangedNodes, findCommonEditableAncestor } from './prose-controller-utils.js';
 /* eslint-enable import/no-unresolved */
+
+function trackCursorAndChanges(rerenderPage, updateCursors, getEditor) {
+  return new Plugin({
+    view() {
+      return {
+        update(view, prevState) {
+          const docChanged = view.state.doc !== prevState.doc;
+
+          if (docChanged) {
+            const changes = findChangedNodes(prevState.doc, view.state.doc);
+
+            if (changes.length > 0) {
+              const commonEditable = findCommonEditableAncestor(view, changes, prevState);
+
+              if (commonEditable) {
+                getEditor?.({ cursorOffset: commonEditable.pos + 1 });
+              } else {
+                rerenderPage?.();
+              }
+            }
+          }
+
+          updateCursors?.();
+        },
+      };
+    },
+  });
+}
 
 function registerErrorHandler(ydoc) {
   ydoc.on('update', () => {
@@ -66,12 +96,15 @@ function addSyncedListener(wsProvider, canWrite, setEditable) {
 /**
  * Initialize minimal ProseMirror + Yjs for the given document path.
  * getToken: () => token — used for WebSocket auth; required (no adobeIMS).
+ * Optional rerenderPage, updateCursors, getEditor enable quick-edit controller mode (trackCursorAndChanges).
  * @param {{ path: string, permissions: string[], setEditable?: (editable: boolean) => void,
- *   getToken?: () => string }} opts
- * @returns {{ proseEl: HTMLElement, wsProvider: WebsocketProvider }}
+ *   getToken?: () => string, rerenderPage?: () => void, updateCursors?: () => void,
+ *   getEditor?: (data: { cursorOffset: number }) => void }} opts
+ * @returns {{ proseEl: HTMLElement, wsProvider: WebsocketProvider, view: EditorView }}
  */
 export default function initProse({
   path, permissions, setEditable, getToken,
+  rerenderPage, updateCursors, getEditor,
 }) {
   if (window.view) {
     window.view.destroy();
@@ -124,6 +157,10 @@ export default function initProse({
     keymap(baseKeymap),
   ];
 
+  if (typeof rerenderPage === 'function' && typeof updateCursors === 'function' && typeof getEditor === 'function') {
+    plugins.push(trackCursorAndChanges(rerenderPage, updateCursors, getEditor));
+  }
+
   let state = EditorState.create({ schema, plugins });
 
   const fix = fixTables(state);
@@ -134,5 +171,5 @@ export default function initProse({
     editable() { return canWrite; },
   });
 
-  return { proseEl: editor, wsProvider };
+  return { proseEl: editor, wsProvider, view: window.view };
 }

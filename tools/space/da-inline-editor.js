@@ -12,9 +12,31 @@ import DA_SDK from 'https://da.live/nx/utils/sdk.js';
 // eslint-disable-next-line import/no-unresolved
 import { DA_ORIGIN } from 'https://da.live/blocks/shared/constants.js';
 import initProse from './prose-inline.js';
+import {
+  updateDocument,
+  updateCursors,
+  getEditor,
+  createControllerOnMessage,
+} from './quick-edit-controller.js';
 
 const style = await getStyle(import.meta.url);
 const { token } = await DA_SDK;
+
+/** Preview origin for gimme_cookie (mirrors da-nx getLivePreviewUrl). Uses prod by default. */
+function getPreviewOrigin(org, repo) {
+  const domain = 'preview.da.live';
+  return `https://main--${repo}--${org}.${domain}`;
+}
+
+/** Set cookie on preview domain so the iframe can load images (mirrors da-nx getImageCookie). */
+function setImageCookie(owner, repo, authToken) {
+  if (!authToken || !owner || !repo) return;
+  const url = `${getPreviewOrigin(owner, repo)}/gimme_cookie`;
+  fetch(url, {
+    credentials: 'include',
+    headers: { Authorization: `Bearer ${authToken}` },
+  }).catch(() => {});
+}
 
 function afterRender(cb) {
   Promise.resolve().then(() => requestAnimationFrame(cb));
@@ -50,8 +72,10 @@ export default class DaInlineEditor extends LitElement {
     org: { type: String },
     repo: { type: String },
     path: { type: String },
+    quickEditPort: { type: Object },
     _proseEl: { state: true },
     _wsProvider: { state: true },
+    _view: { state: true },
     _loading: { state: true },
     _error: { state: true },
   };
@@ -61,10 +85,14 @@ export default class DaInlineEditor extends LitElement {
     this.org = '';
     this.repo = '';
     this.path = '';
+    this.quickEditPort = null;
     this._proseEl = null;
     this._wsProvider = null;
+    this._view = null;
     this._loading = false;
     this._error = null;
+    /** Controller ctx for quick-edit; set when quickEditPort and _view are both set. */
+    this._controllerCtx = null;
   }
 
   get _sourceUrl() {
@@ -75,11 +103,56 @@ export default class DaInlineEditor extends LitElement {
     return this.org && this.repo && this.path && this._sourceUrl;
   }
 
+  /** Page pathname for quick-edit controller (path without org/repo, leading slash, no .html). */
+  get _controllerPathname() {
+    if (!this.path || typeof this.path !== 'string') return '/';
+    const segments = this.path.replace(/^\//, '').split('/').filter(Boolean);
+    const withoutOrgRepo = segments.slice(2).join('/').replace(/\.html$/i, '');
+    return withoutOrgRepo ? `/${withoutOrgRepo}` : '/';
+  }
+
   _setEditable(editable) {
     this.requestUpdate();
     afterRender(() => {
       const pm = this.shadowRoot?.querySelector('.da-inline-editor-mount .ProseMirror');
       if (pm) pm.contentEditable = editable ? 'true' : 'false';
+    });
+  }
+
+  _teardownController() {
+    if (this._controllerCtx?.port) {
+      this._controllerCtx.port.onmessage = null;
+    }
+    this._controllerCtx = null;
+  }
+
+  _setupController() {
+    if (!this.quickEditPort || !this._view || !this._wsProvider) return;
+    if (this._controllerCtx?.port === this.quickEditPort) return;
+
+    this._teardownController();
+
+    const getToken = () => token;
+    this._controllerCtx = {
+      view: this._view,
+      wsProvider: this._wsProvider,
+      port: this.quickEditPort,
+      suppressRerender: false,
+      owner: this.org,
+      repo: this.repo,
+      path: this._controllerPathname,
+      getToken,
+    };
+
+    this.quickEditPort.onmessage = createControllerOnMessage(this._controllerCtx);
+    setImageCookie(this.org, this.repo, token);
+    const sendInitialBody = () => {
+      if (!this._controllerCtx?.port) return;
+      updateDocument(this._controllerCtx);
+      updateCursors(this._controllerCtx);
+    };
+    requestAnimationFrame(() => {
+      requestAnimationFrame(sendInitialBody);
     });
   }
 
@@ -146,6 +219,8 @@ export default class DaInlineEditor extends LitElement {
       this._proseEl.remove();
     }
     this._proseEl = null;
+    this._view = null;
+    this._teardownController();
     this._error = null;
     this._loading = true;
     this.requestUpdate();
@@ -170,16 +245,31 @@ export default class DaInlineEditor extends LitElement {
 
       const setEditable = (editable) => this._setEditable(editable);
       const getToken = () => token;
-      const { proseEl, wsProvider } = initProse({
+      const rerenderPage = () => {
+        if (this._controllerCtx) updateDocument(this._controllerCtx);
+      };
+      const updateCursorsCb = () => {
+        if (this._controllerCtx) updateCursors(this._controllerCtx);
+      };
+      const getEditorCb = (data) => {
+        if (this._controllerCtx) getEditor(data, this._controllerCtx);
+      };
+
+      const { proseEl, wsProvider, view } = initProse({
         path: sourceUrl,
         permissions,
         setEditable,
         getToken,
+        rerenderPage,
+        updateCursors: updateCursorsCb,
+        getEditor: getEditorCb,
       });
 
       this._proseEl = proseEl;
       this._wsProvider = wsProvider;
+      this._view = view;
       this._setupAwarenessUpdates(wsProvider);
+      this._setupController();
     } catch (e) {
       this._error = e?.message || 'Failed to load editor';
       this._proseEl = null;
@@ -200,6 +290,13 @@ export default class DaInlineEditor extends LitElement {
     if (changed.has('org') || changed.has('repo') || changed.has('path')) {
       this._loadEditor();
     }
+    if (changed.has('quickEditPort')) {
+      if (this.quickEditPort && this._view) {
+        this._setupController();
+      } else if (!this.quickEditPort) {
+        this._teardownController();
+      }
+    }
     if (this._proseEl) {
       const mount = this.shadowRoot?.querySelector('.da-inline-editor-mount');
       if (mount && !mount.contains(this._proseEl)) {
@@ -209,6 +306,7 @@ export default class DaInlineEditor extends LitElement {
   }
 
   disconnectedCallback() {
+    this._teardownController();
     if (this._awarenessOff) {
       this._awarenessOff();
       this._awarenessOff = null;
@@ -218,6 +316,7 @@ export default class DaInlineEditor extends LitElement {
       this._wsProvider = undefined;
     }
     this._proseEl = null;
+    this._view = null;
     super.disconnectedCallback();
   }
 

@@ -64,6 +64,7 @@ class Space extends LitElement {
     _detailsOpen: { state: true },
     _publishLoading: { state: true },
     _collabUsers: { state: true },
+    _quickEditPort: { state: true },
   };
 
   constructor() {
@@ -77,6 +78,7 @@ class Space extends LitElement {
     this._detailsOpen = true;
     this._publishLoading = false;
     this._collabUsers = [];
+    this._quickEditPort = null;
   }
 
   _boundCollabUsers = (e) => {
@@ -122,8 +124,66 @@ class Space extends LitElement {
     return [];
   }
 
-  /* eslint-disable-next-line class-methods-use-this */
-  _onWysiwygIframeLoad = () => { /* iframe loaded */ };
+  _onWysiwygIframeLoad = (e) => {
+    const iframe = e?.target;
+    if (!iframe?.contentWindow || this._viewMode !== 'split' || !this._orgRepo || !this._selectedPath) return;
+
+    this._quickEditPort = null;
+    if (this._quickEditInitRetryId) {
+      clearInterval(this._quickEditInitRetryId);
+      this._quickEditInitRetryId = null;
+    }
+
+    const { org, repo } = this._orgRepo;
+    const pathWithoutOrgRepo = this._selectedPath.split('/').slice(2).join('/').replace(/\.html$/i, '');
+    const pathname = pathWithoutOrgRepo ? `/${pathWithoutOrgRepo}` : '/';
+
+    const config = {
+      mountpoint: `https://main--${repo}--${org}.preview.da.live/${org}/${repo}`,
+    };
+    const location = { pathname };
+
+    const QUICK_EDIT_INIT_INTERVAL_MS = 400;
+    const QUICK_EDIT_INIT_MAX_ATTEMPTS = 25;
+
+    const trySendInit = () => {
+      const { port1, port2 } = new MessageChannel();
+
+      port1.onmessage = (ev) => {
+        if (ev.data?.ready !== true) return;
+        if (this._quickEditInitRetryId) {
+          clearInterval(this._quickEditInitRetryId);
+          this._quickEditInitRetryId = null;
+        }
+        this._quickEditPort = port1;
+      };
+
+      try {
+        const targetOrigin = new URL(iframe.src).origin;
+        iframe.contentWindow.postMessage({ init: config, location }, targetOrigin, [port2]);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[da-space] Error posting init to WYSIWYG iframe', err);
+      }
+    };
+
+    let attempts = 0;
+    trySendInit();
+    this._quickEditInitRetryId = setInterval(() => {
+      attempts += 1;
+      if (attempts >= QUICK_EDIT_INIT_MAX_ATTEMPTS) {
+        clearInterval(this._quickEditInitRetryId);
+        this._quickEditInitRetryId = null;
+        return;
+      }
+      if (this._quickEditPort != null) {
+        clearInterval(this._quickEditInitRetryId);
+        this._quickEditInitRetryId = null;
+        return;
+      }
+      trySendInit();
+    }, QUICK_EDIT_INIT_INTERVAL_MS);
+  };
 
   _onWysiwygIframeError = () => {
     // eslint-disable-next-line no-console
@@ -190,6 +250,17 @@ class Space extends LitElement {
     this.addEventListener('da-collab-users', this._boundCollabUsers);
   }
 
+  updated(changed) {
+    super.updated?.(changed);
+    if (changed.has('_viewMode') && this._viewMode !== 'split') {
+      this._quickEditPort = null;
+      if (this._quickEditInitRetryId) {
+        clearInterval(this._quickEditInitRetryId);
+        this._quickEditInitRetryId = null;
+      }
+    }
+  }
+
   disconnectedCallback() {
     window.removeEventListener('hashchange', this._boundHashChange);
     this.removeEventListener('da-file-browser-select', this._boundFileSelect);
@@ -204,7 +275,8 @@ class Space extends LitElement {
     const pathWithoutOrgRepo = segments.slice(2).join('/');
     const pathWithoutHtml = pathWithoutOrgRepo.replace(/\.html$/i, '');
     const encodedPath = pathWithoutHtml.split('/').map(encodeURIComponent).join('/');
-    return `https://main--${repo}--${org}.preview.da.live/${encodedPath}?nx=qe-img-security&quick-edit=qe-img-security`;
+    const base = `https://main--${repo}--${org}.preview.da.live/${encodedPath}?nx=exp-workspace&quick-edit=exp-workspace`;
+    return this._viewMode === 'split' ? `${base}&controller=parent` : base;
   }
 
   _renderDocPane() {
@@ -216,6 +288,7 @@ class Space extends LitElement {
             .org="${this._orgRepo?.org ?? ''}"
             .repo="${this._orgRepo?.repo ?? ''}"
             .path="${this._selectedPath ?? ''}"
+            .quickEditPort="${this._quickEditPort ?? null}"
           ></da-inline-editor>
         </div>
       </div>
