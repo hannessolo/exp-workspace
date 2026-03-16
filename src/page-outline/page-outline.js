@@ -7,10 +7,7 @@
 import getStyle from 'https://da.live/nx/utils/styles.js';
 // eslint-disable-next-line import/no-unresolved
 import { LitElement, html } from 'da-lit';
-// eslint-disable-next-line import/no-unresolved
-import DA_SDK from 'https://da.live/nx/utils/sdk.js';
 
-const { token } = await DA_SDK;
 const style = await getStyle(import.meta.url);
 
 /**
@@ -74,21 +71,14 @@ function parseBlockStructure(htmlText) {
  * Fetch .plain.html for the given path and return block structure.
  * @param {string} origin - e.g. https://main--repo--org.preview.da.live
  * @param {string} pathWithoutOrgRepo - e.g. folder/page or folder/page.html
- * @param {string} [authToken] - Bearer token for authenticated requests
  * @returns {Promise<{ sectionIndex: number, blockName: string }[]>}
  */
-async function fetchBlockStructure(origin, pathWithoutOrgRepo, authToken) {
+async function fetchBlockStructure(origin, pathWithoutOrgRepo) {
   const pathNorm = pathWithoutOrgRepo.replace(/\.html$/i, '').trim();
   if (!pathNorm) return [];
   const encoded = pathNorm.split('/').map(encodeURIComponent).join('/');
   const url = `${origin}/${encoded}.plain.html`;
-  const headers = {};
-  const isLocalhost = window?.location?.hostname === 'localhost';
-  console.log('isLocalhost', isLocalhost);
-  if (authToken && !isLocalhost) {
-    headers.Authorization = `Bearer ${authToken}`;
-  }
-  const resp = await fetch(url, { method: 'GET', headers });
+  const resp = await fetch(url, { method: 'GET' });
   if (!resp.ok) return [];
   const text = await resp.text();
   return parseBlockStructure(text);
@@ -140,7 +130,7 @@ export default class PageOutline extends LitElement {
     this._error = null;
     this.requestUpdate();
     try {
-      this._blocks = await fetchBlockStructure(origin, pathWithoutOrgRepo, token);
+      this._blocks = await fetchBlockStructure(origin, pathWithoutOrgRepo);
     } catch (e) {
       this._error = e?.message || 'Failed to load outline';
       this._blocks = [];
