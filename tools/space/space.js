@@ -10,11 +10,16 @@ import '../../src/chat/chat.js';
 import '../../src/file-browser/file-browser.js';
 import '../../src/page-outline/page-outline.js';
 import './da-inline-editor.js';
+import './file-history.js';
 
 const style = await getStyle(import.meta.url);
 const { token } = await DA_SDK;
 
 const AEM_ORIGIN = 'https://admin.hlx.page';
+
+function isHtmlPath(path) {
+  return typeof path === 'string' && path.toLowerCase().trim().endsWith('.html');
+}
 
 /**
  * POST to AEM admin to preview or publish. Same contract as da-title in da-live.
@@ -314,6 +319,9 @@ class Space extends LitElement {
         this._quickEditInitRetryId = null;
       }
     }
+    if (changed.has('_selectedPath') && this._sidebarTab === 'history' && !isHtmlPath(this._selectedPath)) {
+      this._sidebarTab = 'files';
+    }
     if (changed.has('_orgRepo') || changed.has('_selectedPath')) {
       if (!this._orgRepo || !this._selectedPath) {
         this._wysiwygCookieReady = false;
@@ -534,6 +542,17 @@ class Space extends LitElement {
               id="space-details-tab-outline"
               @click="${() => { this._sidebarTab = 'outline'; }}"
             >Outline</button>
+            ${isHtmlPath(this._selectedPath) ? html`
+            <button
+              type="button"
+              role="tab"
+              class="space-details-tab"
+              aria-selected="${this._sidebarTab === 'history'}"
+              aria-controls="space-details-panel-history"
+              id="space-details-tab-history"
+              @click="${() => { this._sidebarTab = 'history'; }}"
+            >History</button>
+            ` : ''}
           </div>
           <div
             id="space-details-panel-files"
@@ -560,6 +579,18 @@ class Space extends LitElement {
               .blockPositions="${this._blockPositions}"
               @da-outline-move-block="${this._onOutlineMoveBlock}"
             ></da-page-outline>
+          </div>
+          <div
+            id="space-details-panel-history"
+            role="tabpanel"
+            aria-labelledby="space-details-tab-history"
+            class="space-details-panel"
+            ?hidden="${this._sidebarTab !== 'history'}"
+          >
+            <da-file-history
+              class="space-file-history"
+              .path="${this._selectedPath ? `/${this._selectedPath.replace(/^\//, '')}` : ''}"
+            ></da-file-history>
           </div>
         </div>
       </sp-split-view>
