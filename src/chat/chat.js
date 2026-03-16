@@ -12,6 +12,15 @@ const { token } = await DA_SDK;
 
 const DOCUMENT_UPDATED_EVENT = 'da:agent-content-updated';
 
+function getUserIdFromToken(jwtToken) {
+  try {
+    const payload = JSON.parse(atob(jwtToken.split('.')[1]));
+    return payload.userId || payload.sub || payload.email || null;
+  } catch {
+    return null;
+  }
+}
+
 function getContextFromHash() {
   const hash = window.location.hash || '';
   const path = hash.replace(/^#\/?/, '').trim();
@@ -68,13 +77,15 @@ class Chat extends LitElement {
   _ensureController() {
     if (this._chatController) return;
 
-    // Use a unique room per project so the Durable Object instance is isolated
-    // and doesn't accumulate stale history from other users / sessions.
+    // Use a unique room per user per project so each person gets their own
+    // isolated Durable Object instance with separate conversation history.
     const { org, site } = getContextFromHash();
-    const agentRoom = org && site ? `${org}--${site}` : 'default';
+    const userId = getUserIdFromToken(token);
+    const agentRoom = org && site && userId
+      ? `${org}--${site}--${userId}`
+      : 'default';
 
     this._chatController = new ChatController({
-      host: 'da-agent.adobeaem.workers.dev',
       name: agentRoom,
       getContext: getContextFromHash,
       getImsToken: () => token,
@@ -260,34 +271,34 @@ class Chat extends LitElement {
     `;
   }
 
-  _renderSkillsBar() {
+  _renderSkillsButton() {
     return html`
-      <div class="chat-skills-bar">
-        <overlay-trigger type="modal" triggered-by="click">
-          <sp-dialog-wrapper slot="click-content" headline="Skills library" dismissable underlay>
-            <div class="chat-skills-modal-body">
-              <sp-sidenav
-                class="chat-skills-sidenav"
-                .value="${this._skillsLibraryTab}"
-                @change="${this._onSkillsNavChange}"
-              >
-                <sp-sidenav-item value="skills" label="Skills" ?selected="${this._skillsLibraryTab === 'skills'}"></sp-sidenav-item>
-                <sp-sidenav-item value="mcp" label="MCP" ?selected="${this._skillsLibraryTab === 'mcp'}"></sp-sidenav-item>
-                <sp-sidenav-item value="agents" label="Agents" ?selected="${this._skillsLibraryTab === 'agents'}"></sp-sidenav-item>
-              </sp-sidenav>
-              <div class="chat-skills-content">
-                <div class="chat-skills-empty">
-                  <svg class="chat-skills-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                    <path d="M2 12h4v8H2zM10 6h4v14h-4zM18 2h4v20h-4z"/>
-                  </svg>
-                  <p class="chat-skills-empty-text">Nothing here yet.</p>
-                </div>
+      <overlay-trigger type="modal" triggered-by="click">
+        <sp-dialog-wrapper slot="click-content" headline="Skills library" dismissable underlay>
+          <div class="chat-skills-modal-body">
+            <sp-sidenav
+              class="chat-skills-sidenav"
+              .value="${this._skillsLibraryTab}"
+              @change="${this._onSkillsNavChange}"
+            >
+              <sp-sidenav-item value="skills" label="Skills" ?selected="${this._skillsLibraryTab === 'skills'}"></sp-sidenav-item>
+              <sp-sidenav-item value="mcp" label="MCP" ?selected="${this._skillsLibraryTab === 'mcp'}"></sp-sidenav-item>
+              <sp-sidenav-item value="agents" label="Agents" ?selected="${this._skillsLibraryTab === 'agents'}"></sp-sidenav-item>
+            </sp-sidenav>
+            <div class="chat-skills-content">
+              <div class="chat-skills-empty">
+                <svg class="chat-skills-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                  <path d="M2 12h4v8H2zM10 6h4v14h-4zM18 2h4v20h-4z"/>
+                </svg>
+                <p class="chat-skills-empty-text">Nothing here yet.</p>
               </div>
             </div>
-          </sp-dialog-wrapper>
-          <sp-button slot="trigger" variant="secondary" size="s">Skills library</sp-button>
-        </overlay-trigger>
-      </div>
+          </div>
+        </sp-dialog-wrapper>
+        <sp-action-button slot="trigger" label="Skills library" quiet>
+          <svg slot="icon" width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M8.75 5.375C8.40527 5.375 8.125 5.65527 8.125 6V10C8.125 10.3447 8.40527 10.625 8.75 10.625C9.09473 10.625 9.375 10.3447 9.375 10V6C9.375 5.65527 9.09473 5.375 8.75 5.375Z" fill="currentColor"/><path d="M18.8643 15.5586L16.3311 4.33984C16.1182 3.40039 15.1787 2.80371 14.2383 3.01953L12.7764 3.34961C12.473 3.41773 12.2046 3.5669 11.9824 3.77124C11.8926 2.78149 11.0674 2 10.0547 2H7.44531C6.37304 2 5.5 2.87305 5.5 3.94531V4.02539C5.41772 4.01318 5.33557 4 5.25 4H3.75C2.78516 4 2 4.78516 2 5.75V16.25C2 17.2148 2.78516 18 3.75 18H5.25C5.65173 18 6.0177 17.8584 6.31348 17.6299C6.63306 17.8604 7.02222 18 7.44532 18H10.0547C11.127 18 12 17.1269 12 16.0547V7.85864L13.9873 16.6582C14.0899 17.1152 14.3633 17.5039 14.7588 17.7529C15.042 17.9326 15.3623 18.0244 15.6894 18.0244C15.8193 18.0244 15.9502 18.0098 16.0791 17.9805L17.541 17.6504C17.998 17.5478 18.3867 17.2734 18.6367 16.8779C18.8857 16.4834 18.9668 16.0146 18.8643 15.5586ZM3.74999 5.5H5.24999C5.38769 5.5 5.49999 5.6123 5.49999 5.75V13.5137C5.47667 13.5115 5.45653 13.5 5.43261 13.5H3.49999V5.75C3.49999 5.6123 3.61229 5.5 3.74999 5.5ZM5.49999 16.25C5.49999 16.3877 5.38769 16.5 5.24999 16.5H3.74999C3.61229 16.5 3.49999 16.3877 3.49999 16.25V15H5.43261C5.45654 15 5.47668 14.9885 5.49999 14.9863V16.25ZM10.5 16.0547C10.5 16.2998 10.2998 16.5 10.0547 16.5H7.4453C7.20018 16.5 6.99999 16.2998 6.99999 16.0547V3.94531C6.99999 3.70019 7.20019 3.5 7.4453 3.5H10.0547C10.2998 3.5 10.5 3.7002 10.5 3.94531V16.0547ZM17.3682 16.0772C17.3476 16.1094 17.2998 16.168 17.2129 16.1875L15.748 16.5176C15.6621 16.541 15.5928 16.5049 15.5595 16.4853C15.5273 16.4648 15.4697 16.417 15.4502 16.3291L12.917 5.11035C12.8974 5.02344 12.9287 4.95508 12.9492 4.92285C12.9697 4.88965 13.0176 4.83203 13.1054 4.8125L14.5693 4.48242C14.5879 4.47851 14.6055 4.47656 14.624 4.47656C14.7383 4.47656 14.8418 4.55566 14.8682 4.6709L17.4014 15.8887C17.4209 15.9766 17.3887 16.0439 17.3682 16.0772Z" fill="currentColor"/></svg>
+        </sp-action-button>
+      </overlay-trigger>
     `;
   }
 
@@ -336,9 +347,8 @@ class Chat extends LitElement {
           `)}
         </div>
 
-        ${this._renderSkillsBar()}
-
         <div class="chat-footer">
+          ${this._renderSkillsButton()}
           <sp-textfield
             class="chat-input"
             label="Message"

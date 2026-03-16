@@ -163,12 +163,6 @@ export class ChatController {
     this.onStatusChange(this.statusText);
     this.onUpdate();
 
-    // Clear any stale server-side conversation state on fresh connect so the
-    // agent always starts with a clean history for this session.
-    if (this.agent) {
-      this.agent.send(JSON.stringify({ type: MESSAGE_TYPE.CHAT_CLEAR }));
-    }
-
     this.loadInitialMessages();
   }
 

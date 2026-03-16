@@ -211,17 +211,6 @@
   justify-content: center;
 }
 
-/* ── Skills bar ───────────────────────────────────────────── */
-
-.chat-skills-bar {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  padding: 8px 16px;
-  background: linear-gradient(135deg, #7d5ba6 0%, #9b7bbf 50%, #8b6cb8 100%);
-  border-top: 1px solid rgb(255 255 255 / 15%);
-}
-
 /* Skills library modal */
 
 .chat-skills-modal-body {
