@@ -11,6 +11,7 @@ import '../../src/file-browser/file-browser.js';
 import '../../src/page-outline/page-outline.js';
 import './da-inline-editor.js';
 import './file-history.js';
+import './page-metadata.js';
 
 const style = await getStyle(import.meta.url);
 const { token } = await DA_SDK;
@@ -319,8 +320,10 @@ class Space extends LitElement {
         this._quickEditInitRetryId = null;
       }
     }
-    if (changed.has('_selectedPath') && this._sidebarTab === 'history' && !isHtmlPath(this._selectedPath)) {
-      this._sidebarTab = 'files';
+    if (changed.has('_selectedPath') && !isHtmlPath(this._selectedPath)) {
+      if (this._sidebarTab === 'history' || this._sidebarTab === 'metadata') {
+        this._sidebarTab = 'files';
+      }
     }
     if (changed.has('_orgRepo') || changed.has('_selectedPath')) {
       if (!this._orgRepo || !this._selectedPath) {
@@ -547,6 +550,17 @@ class Space extends LitElement {
               type="button"
               role="tab"
               class="space-details-tab"
+              aria-selected="${this._sidebarTab === 'metadata'}"
+              aria-controls="space-details-panel-metadata"
+              id="space-details-tab-metadata"
+              @click="${() => { this._sidebarTab = 'metadata'; }}"
+            >Metadata</button>
+            ` : ''}
+            ${isHtmlPath(this._selectedPath) ? html`
+            <button
+              type="button"
+              role="tab"
+              class="space-details-tab"
               aria-selected="${this._sidebarTab === 'history'}"
               aria-controls="space-details-panel-history"
               id="space-details-tab-history"
@@ -579,6 +593,18 @@ class Space extends LitElement {
               .blockPositions="${this._blockPositions}"
               @da-outline-move-block="${this._onOutlineMoveBlock}"
             ></da-page-outline>
+          </div>
+          <div
+            id="space-details-panel-metadata"
+            role="tabpanel"
+            aria-labelledby="space-details-tab-metadata"
+            class="space-details-panel"
+            ?hidden="${this._sidebarTab !== 'metadata'}"
+          >
+            <da-page-metadata
+              class="space-page-metadata"
+              .plainHtml="${this._outlineHtml ?? ''}"
+            ></da-page-metadata>
           </div>
           <div
             id="space-details-panel-history"
