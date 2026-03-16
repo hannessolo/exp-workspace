@@ -189,6 +189,7 @@ export default class PageOutline extends LitElement {
     const flatBlocks = this._flatBlocks;
     const positionsLength = this.blockPositions?.length ?? 0;
     const canReorder = flatBlocks.length > 0 && positionsLength === flatBlocks.length;
+    const showHandles = flatBlocks.length > 0;
     let flatIndexCounter = 0;
 
     return html`
@@ -217,8 +218,8 @@ export default class PageOutline extends LitElement {
   @dragleave="${this._onDragLeave}"
   @drop="${(ev) => this._onDrop(ev, flatIndex)}"
 >
-  ${canReorder ? html`
-  <span class="page-outline-block-handle" aria-label="Drag to reorder">
+  ${showHandles ? html`
+  <span class="page-outline-block-handle" aria-label="${canReorder ? 'Drag to reorder' : 'Reorder not available'}">
     <sp-icon-double-gripper size="s" class="page-outline-grip"></sp-icon-double-gripper>
   </span>
   ` : ''}

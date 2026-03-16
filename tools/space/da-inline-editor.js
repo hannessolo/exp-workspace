@@ -291,17 +291,22 @@ export default class DaInlineEditor extends LitElement {
       this._view = view;
       this._setupAwarenessUpdates(wsProvider);
       this._setupController();
-      // Push initial HTML to outline (doc-only view; sendInitialBody only runs in split)
-      requestAnimationFrame(() => {
-        if (this._view) {
-          if (typeof this.onEditorHtmlChange === 'function') {
-            this.onEditorHtmlChange(getInstrumentedHTML(this._view));
-          }
-          if (typeof this.onBlockPositions === 'function') {
-            this.onBlockPositions(getBlockPositions(this._view));
-          }
+      // Push initial HTML and block positions. Doc can have 0 tables at first (before Y sync);
+      // push again after a short delay so outline gets positions once tables exist.
+      const pushOutlineState = () => {
+        if (!this._view) return;
+        if (typeof this.onEditorHtmlChange === 'function') {
+          this.onEditorHtmlChange(getInstrumentedHTML(this._view));
         }
+        if (typeof this.onBlockPositions === 'function') {
+          this.onBlockPositions(getBlockPositions(this._view));
+        }
+      };
+      requestAnimationFrame(() => pushOutlineState());
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => pushOutlineState());
       });
+      setTimeout(() => pushOutlineState(), 200);
     } catch (e) {
       this._error = e?.message || 'Failed to load editor';
       this._proseEl = null;

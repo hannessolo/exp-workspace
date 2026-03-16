@@ -105,6 +105,11 @@
   cursor: grabbing;
 }
 
+.page-outline .page-outline-block:not([draggable="true"]) .page-outline-block-handle {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .page-outline .page-outline-grip {
   display: block;
 }

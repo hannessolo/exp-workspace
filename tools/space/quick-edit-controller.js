@@ -293,8 +293,24 @@ export async function handlePreview(ctx) {
 }
 
 /**
- * Collect start positions of all block nodes (tables) in document order.
- * Used by the page outline to map flat block index to ProseMirror position for move-block.
+ * Block name from a ProseMirror table (first row, first cell text). Matches prose2aem block naming.
+ * @param {import('prosemirror-model').Node} tableNode
+ * @returns {string}
+ */
+function getTableBlockName(tableNode) {
+  const firstRow = tableNode.firstChild;
+  if (!firstRow) return '';
+  const firstCell = firstRow.firstChild;
+  if (!firstCell) return '';
+  const raw = firstCell.textContent?.trim() ?? '';
+  const match = raw.match(/^([a-zA-Z0-9_\s-]+)(?:\s*\([^)]*\))?$/);
+  return match ? match[1].trim().toLowerCase() : raw.toLowerCase();
+}
+
+/**
+ * Collect start positions of all block nodes (tables) in document order, excluding the root
+ * "metadata" block (it is stripped by prose2aem in live preview so it has no corresponding
+ * block in the outline HTML).
  * @param {import('prosemirror-view').EditorView} view
  * @returns {number[]}
  */
@@ -304,6 +320,8 @@ export function getBlockPositions(view) {
   const { doc } = view.state;
   doc.descendants((node, pos) => {
     if (node.type.name === 'table') {
+      const blockName = getTableBlockName(node);
+      if (blockName === 'metadata') return;
       positions.push(pos);
     }
   });
