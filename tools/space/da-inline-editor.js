@@ -17,6 +17,8 @@ import {
   updateCursors,
   getEditor,
   getInstrumentedHTML,
+  getBlockPositions,
+  moveBlockAt,
   createControllerOnMessage,
 } from './quick-edit-controller.js';
 
@@ -75,6 +77,9 @@ export default class DaInlineEditor extends LitElement {
     path: { type: String },
     quickEditPort: { type: Object },
     onEditorHtmlChange: { type: Function },
+    onBlockPositions: { type: Function },
+    pendingMove: { type: Object },
+    onMoveBlockDone: { type: Function },
     _proseEl: { state: true },
     _wsProvider: { state: true },
     _view: { state: true },
@@ -153,8 +158,10 @@ export default class DaInlineEditor extends LitElement {
       updateDocument(this._controllerCtx);
       updateCursors(this._controllerCtx);
       if (typeof this.onEditorHtmlChange === 'function') {
-        console.log('sending initial body');
         this.onEditorHtmlChange(getInstrumentedHTML(this._controllerCtx.view));
+      }
+      if (typeof this.onBlockPositions === 'function') {
+        this.onBlockPositions(getBlockPositions(this._controllerCtx.view));
       }
     };
     requestAnimationFrame(() => {
@@ -258,6 +265,9 @@ export default class DaInlineEditor extends LitElement {
         if (typeof this.onEditorHtmlChange === 'function' && this._view) {
           this.onEditorHtmlChange(getInstrumentedHTML(this._view));
         }
+        if (typeof this.onBlockPositions === 'function' && this._view) {
+          this.onBlockPositions(getBlockPositions(this._view));
+        }
       };
       const updateCursorsCb = () => {
         if (this._controllerCtx) updateCursors(this._controllerCtx);
@@ -283,8 +293,13 @@ export default class DaInlineEditor extends LitElement {
       this._setupController();
       // Push initial HTML to outline (doc-only view; sendInitialBody only runs in split)
       requestAnimationFrame(() => {
-        if (this._view && typeof this.onEditorHtmlChange === 'function') {
-          this.onEditorHtmlChange(getInstrumentedHTML(this._view));
+        if (this._view) {
+          if (typeof this.onEditorHtmlChange === 'function') {
+            this.onEditorHtmlChange(getInstrumentedHTML(this._view));
+          }
+          if (typeof this.onBlockPositions === 'function') {
+            this.onBlockPositions(getBlockPositions(this._view));
+          }
         }
       });
     } catch (e) {
@@ -312,6 +327,14 @@ export default class DaInlineEditor extends LitElement {
         this._setupController();
       } else if (!this.quickEditPort) {
         this._teardownController();
+      }
+    }
+    if (changed.has('pendingMove') && this.pendingMove?.fromIndex != null && this.pendingMove?.toIndex != null) {
+      if (this._view) {
+        moveBlockAt(this.pendingMove, { view: this._view });
+      }
+      if (typeof this.onMoveBlockDone === 'function') {
+        this.onMoveBlockDone();
       }
     }
     if (this._proseEl) {

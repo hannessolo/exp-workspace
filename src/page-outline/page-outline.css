@@ -86,6 +86,41 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+  flex: 1;
+  min-width: 0;
+}
+
+.page-outline .page-outline-block-handle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline-end: var(--spectrum-global-dimension-size-100, 4px);
+  padding: var(--spectrum-global-dimension-size-50, 4px);
+  color: var(--spectrum-global-color-gray-500, #6e6e6e);
+  cursor: grab;
+}
+
+.page-outline .page-outline-block-handle:active {
+  cursor: grabbing;
+}
+
+.page-outline .page-outline-grip {
+  display: block;
+}
+
+.page-outline .page-outline-block[draggable="true"] {
+  cursor: grab;
+}
+
+.page-outline .page-outline-block.page-outline-block-dragging {
+  opacity: 0.6;
+}
+
+.page-outline .page-outline-block.page-outline-block-drop-target {
+  background: var(--spectrum-global-color-blue-100, #e0f0ff);
+  outline: 2px solid var(--spectrum-global-color-blue-500, #1473e6);
+  outline-offset: -2px;
 }
 
 .page-outline .page-outline-placeholder {

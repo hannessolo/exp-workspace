@@ -67,6 +67,8 @@ class Space extends LitElement {
     _quickEditPort: { state: true },
     _wysiwygCookieReady: { state: true },
     _outlineHtml: { state: true },
+    _blockPositions: { state: true },
+    _pendingMove: { state: true },
   };
 
   constructor() {
@@ -75,6 +77,8 @@ class Space extends LitElement {
     this._selectedPath = '';
     this._orgRepo = null;
     this._outlineHtml = '';
+    this._blockPositions = [];
+    this._pendingMove = null;
     this._sidebarTab = 'files';
     this._viewMode = 'wysiwyg';
     this._chatOpen = true;
@@ -98,17 +102,32 @@ class Space extends LitElement {
     const pathSegments = path ? path.split('/').filter(Boolean) : [];
     this._selectedPath = pathSegments.length > 2 ? path : '';
     this._outlineHtml = '';
+    this._blockPositions = [];
   };
 
   _boundFileSelect = (e) => {
     const path = e.detail?.item?.path;
     this._selectedPath = typeof path === 'string' ? path.replace(/^\//, '') : '';
     this._outlineHtml = '';
+    this._blockPositions = [];
   };
 
   _onEditorHtmlChange = (body) => {
-    console.log('body', body);
     this._outlineHtml = body ?? '';
+  };
+
+  _onBlockPositions = (positions) => {
+    this._blockPositions = Array.isArray(positions) ? positions : [];
+  };
+
+  _onOutlineMoveBlock = (e) => {
+    const { fromIndex, toIndex } = e.detail ?? {};
+    if (typeof fromIndex !== 'number' || typeof toIndex !== 'number') return;
+    this._pendingMove = { fromIndex, toIndex };
+  };
+
+  _onMoveBlockDone = () => {
+    this._pendingMove = null;
   };
 
   _onViewModeChange = (e) => {
@@ -342,6 +361,9 @@ class Space extends LitElement {
             .path="${this._selectedPath ?? ''}"
             .quickEditPort="${this._quickEditPort ?? null}"
             .onEditorHtmlChange="${this._onEditorHtmlChange}"
+            .onBlockPositions="${this._onBlockPositions}"
+            .pendingMove="${this._pendingMove}"
+            .onMoveBlockDone="${this._onMoveBlockDone}"
           ></da-inline-editor>
         </div>
       </div>
@@ -535,6 +557,8 @@ class Space extends LitElement {
               .org="${this._orgRepo?.org ?? ''}"
               .repo="${this._orgRepo?.repo ?? ''}"
               .plainHtml="${this._outlineHtml ?? ''}"
+              .blockPositions="${this._blockPositions}"
+              @da-outline-move-block="${this._onOutlineMoveBlock}"
             ></da-page-outline>
           </div>
         </div>

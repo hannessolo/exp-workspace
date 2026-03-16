@@ -293,6 +293,60 @@ export async function handlePreview(ctx) {
 }
 
 /**
+ * Collect start positions of all block nodes (tables) in document order.
+ * Used by the page outline to map flat block index to ProseMirror position for move-block.
+ * @param {import('prosemirror-view').EditorView} view
+ * @returns {number[]}
+ */
+export function getBlockPositions(view) {
+  if (!view?.state?.doc) return [];
+  const positions = [];
+  const { doc } = view.state;
+  doc.descendants((node, pos) => {
+    if (node.type.name === 'table') {
+      positions.push(pos);
+    }
+  });
+  return positions;
+}
+
+/**
+ * Move the block (table) at fromIndex to before the block at toIndex.
+ * Indices are the position before each table (from getBlockPositions), so the table is nodeAfter.
+ * @param {{ fromIndex: number, toIndex: number }} data - ProseMirror positions
+ * @param {{ view: import('prosemirror-view').EditorView }} ctx
+ */
+export function moveBlockAt(data, ctx) {
+  const { fromIndex, toIndex } = data;
+  const { view } = ctx || {};
+  if (!view?.state) return;
+
+  const { tr, doc } = view.state;
+
+  try {
+    const $fromPos = doc.resolve(fromIndex);
+    const tableNode = $fromPos.nodeAfter;
+    if (!tableNode?.type || tableNode.type.name !== 'table') return;
+
+    const fromStart = $fromPos.pos;
+    const fromEnd = fromStart + tableNode.nodeSize;
+
+    const $toPos = doc.resolve(toIndex);
+    if ($toPos.nodeAfter?.type?.name !== 'table') return;
+    const toStart = $toPos.pos;
+
+    tr.delete(fromStart, fromEnd);
+    const insertPos = toStart > fromStart ? toStart - tableNode.nodeSize : toStart;
+    tr.insert(insertPos, tableNode);
+
+    view.dispatch(tr.scrollIntoView());
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error('[quick-edit-controller] moveBlockAt failed', e?.message);
+  }
+}
+
+/**
  * Create the onmessage handler for the controller port.
  * @param {MessageEvent} e
  * @param {object} ctx - { view, wsProvider, port, suppressRerender, owner, repo, path, getToken }
@@ -313,6 +367,8 @@ export function createControllerOnMessage(ctx) {
       handleUndoRedo(e.data, ctx);
     } else if (e.data.type === 'preview') {
       handlePreview(ctx);
+    } else if (e.data.type === 'move-block') {
+      moveBlockAt(e.data, ctx);
     }
   };
 }

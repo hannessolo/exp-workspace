@@ -62,7 +62,9 @@ export default class PageOutline extends LitElement {
     org: { type: String },
     repo: { type: String },
     plainHtml: { type: String },
+    blockPositions: { type: Array },
     _blocks: { state: true },
+    _dragOverIndex: { state: true },
   };
 
   constructor() {
@@ -71,11 +73,29 @@ export default class PageOutline extends LitElement {
     this.org = '';
     this.repo = '';
     this.plainHtml = '';
+    this.blockPositions = [];
     this._blocks = [];
+    this._dragOverIndex = -1;
+    this._draggedFlatIndex = -1;
   }
 
   get _isPage() {
     return isPagePath(this.selectedPath);
+  }
+
+  /** Flat list { sectionIndex, blockName, flatIndex } for drag/drop. */
+  get _flatBlocks() {
+    const flat = [];
+    this._sectionsWithBlocks.forEach((sec) => {
+      sec.blocks.forEach((blockName) => {
+        flat.push({
+          sectionIndex: sec.sectionIndex,
+          blockName,
+          flatIndex: flat.length,
+        });
+      });
+    });
+    return flat;
   }
 
   updated(changed) {
@@ -91,6 +111,57 @@ export default class PageOutline extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     this.shadowRoot.adoptedStyleSheets = [style];
+  }
+
+  _onDragStart(e, flatIndex) {
+    this._draggedFlatIndex = flatIndex;
+    e.dataTransfer.setData('text/plain', String(flatIndex));
+    e.dataTransfer.effectAllowed = 'move';
+    if (e.target instanceof HTMLElement) {
+      e.target.closest('.page-outline-block')?.classList.add('page-outline-block-dragging');
+    }
+  }
+
+  _onDragEnd(e) {
+    this._draggedFlatIndex = -1;
+    this._dragOverIndex = -1;
+    if (e.target instanceof HTMLElement) {
+      e.target.closest('.page-outline-block')?.classList.remove('page-outline-block-dragging');
+    }
+    this.requestUpdate();
+  }
+
+  _onDragOver(e, flatIndex) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (this._draggedFlatIndex >= 0 && flatIndex !== this._draggedFlatIndex) {
+      this._dragOverIndex = flatIndex;
+      this.requestUpdate();
+    }
+  }
+
+  _onDragLeave() {
+    this._dragOverIndex = -1;
+    this.requestUpdate();
+  }
+
+  _onDrop(e, dropFlatIndex) {
+    e.preventDefault();
+    this._dragOverIndex = -1;
+    const fromFlat = this._draggedFlatIndex;
+    if (fromFlat < 0 || fromFlat === dropFlatIndex) return;
+    const positions = this.blockPositions ?? [];
+    if (fromFlat >= positions.length || dropFlatIndex >= positions.length) return;
+    const fromIndex = positions[fromFlat];
+    const toIndex = positions[dropFlatIndex];
+    if (typeof fromIndex !== 'number' || typeof toIndex !== 'number') return;
+    this.dispatchEvent(new CustomEvent('da-outline-move-block', {
+      bubbles: true,
+      composed: true,
+      detail: { fromIndex, toIndex },
+    }));
+    this._draggedFlatIndex = -1;
+    this.requestUpdate();
   }
 
   render() {
@@ -115,6 +186,11 @@ export default class PageOutline extends LitElement {
     }
 
     const sections = this._sectionsWithBlocks;
+    const flatBlocks = this._flatBlocks;
+    const positionsLength = this.blockPositions?.length ?? 0;
+    const canReorder = flatBlocks.length > 0 && positionsLength === flatBlocks.length;
+    let flatIndexCounter = 0;
+
     return html`
 <div class="page-outline">
   <div class="page-outline-header">Page outline</div>
@@ -125,13 +201,31 @@ export default class PageOutline extends LitElement {
 <ul class="page-outline-list" role="tree" aria-label="Page outline">
   ${sections.map((sec) => html`
 <li class="page-outline-section" role="treeitem" aria-expanded="true">
-  <span class="page-outline-section-label">§${sec.sectionIndex + 1}</span>
+  <span class="page-outline-section-label">Section ${sec.sectionIndex + 1}</span>
   <ul class="page-outline-block-list" role="group">
-    ${sec.blocks.map((blockName) => html`
-<li class="page-outline-block" role="treeitem">
+    ${sec.blocks.map((blockName) => {
+    const flatIndex = flatIndexCounter;
+    flatIndexCounter += 1;
+    const isDropTarget = canReorder && this._dragOverIndex === flatIndex;
+    return html`
+<li class="page-outline-block ${isDropTarget ? 'page-outline-block-drop-target' : ''}"
+  role="treeitem"
+  draggable="${canReorder}"
+  @dragstart="${(ev) => this._onDragStart(ev, flatIndex)}"
+  @dragend="${this._onDragEnd}"
+  @dragover="${(ev) => this._onDragOver(ev, flatIndex)}"
+  @dragleave="${this._onDragLeave}"
+  @drop="${(ev) => this._onDrop(ev, flatIndex)}"
+>
+  ${canReorder ? html`
+  <span class="page-outline-block-handle" aria-label="Drag to reorder">
+    <sp-icon-double-gripper size="s" class="page-outline-grip"></sp-icon-double-gripper>
+  </span>
+  ` : ''}
   <span class="page-outline-block-name">${blockName}</span>
 </li>
-    `)}
+    `;
+  })}
   </ul>
 </li>
   `)}

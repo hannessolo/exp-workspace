@@ -10,6 +10,7 @@ import '@spectrum-web-components/button/sp-button.js';
 import '@spectrum-web-components/textfield/sp-textfield.js';
 import '@spectrum-web-components/split-view/sp-split-view.js';
 import '@spectrum-web-components/icons-ui/icons/sp-icon-chevron200.js';
+import '@spectrum-web-components/icons-ui/icons/sp-icon-double-gripper.js';
 import '@spectrum-web-components/icons-workflow/icons/sp-icon-folder.js';
 import '@spectrum-web-components/icons-workflow/icons/sp-icon-file.js';
 import '@spectrum-web-components/tabs/sp-tabs.js';
