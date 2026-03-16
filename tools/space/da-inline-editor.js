@@ -16,6 +16,7 @@ import {
   updateDocument,
   updateCursors,
   getEditor,
+  getInstrumentedHTML,
   createControllerOnMessage,
 } from './quick-edit-controller.js';
 
@@ -73,6 +74,7 @@ export default class DaInlineEditor extends LitElement {
     repo: { type: String },
     path: { type: String },
     quickEditPort: { type: Object },
+    onEditorHtmlChange: { type: Function },
     _proseEl: { state: true },
     _wsProvider: { state: true },
     _view: { state: true },
@@ -150,6 +152,10 @@ export default class DaInlineEditor extends LitElement {
       if (!this._controllerCtx?.port) return;
       updateDocument(this._controllerCtx);
       updateCursors(this._controllerCtx);
+      if (typeof this.onEditorHtmlChange === 'function') {
+        console.log('sending initial body');
+        this.onEditorHtmlChange(getInstrumentedHTML(this._controllerCtx.view));
+      }
     };
     requestAnimationFrame(() => {
       requestAnimationFrame(sendInitialBody);
@@ -246,7 +252,12 @@ export default class DaInlineEditor extends LitElement {
       const setEditable = (editable) => this._setEditable(editable);
       const getToken = () => token;
       const rerenderPage = () => {
-        if (this._controllerCtx) updateDocument(this._controllerCtx);
+        if (this._controllerCtx) {
+          updateDocument(this._controllerCtx);
+        }
+        if (typeof this.onEditorHtmlChange === 'function' && this._view) {
+          this.onEditorHtmlChange(getInstrumentedHTML(this._view));
+        }
       };
       const updateCursorsCb = () => {
         if (this._controllerCtx) updateCursors(this._controllerCtx);
@@ -270,6 +281,12 @@ export default class DaInlineEditor extends LitElement {
       this._view = view;
       this._setupAwarenessUpdates(wsProvider);
       this._setupController();
+      // Push initial HTML to outline (doc-only view; sendInitialBody only runs in split)
+      requestAnimationFrame(() => {
+        if (this._view && typeof this.onEditorHtmlChange === 'function') {
+          this.onEditorHtmlChange(getInstrumentedHTML(this._view));
+        }
+      });
     } catch (e) {
       this._error = e?.message || 'Failed to load editor';
       this._proseEl = null;

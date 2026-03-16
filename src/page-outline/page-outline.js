@@ -1,6 +1,6 @@
 /**
  * Page outline: shows block structure of the currently selected page.
- * Fetches .plain.html from preview, parses main > section > block, displays with Spectrum UI.
+ * Driven by editor-provided AEM HTML (prose2aem output); parses main > section > block.
  * Only active when a page (e.g. .html) is selected.
  */
 // eslint-disable-next-line import/no-unresolved
@@ -9,17 +9,6 @@ import getStyle from 'https://da.live/nx/utils/styles.js';
 import { LitElement, html } from 'da-lit';
 
 const style = await getStyle(import.meta.url);
-
-/**
- * Build preview origin for org/repo.
- * @param {string} org
- * @param {string} repo
- * @returns {string}
- */
-function previewOrigin(org, repo) {
-  if (!org || !repo) return '';
-  return `https://main--${repo}--${org}.preview.da.live`;
-}
 
 /**
  * True if the selected path represents a page we can load for outline (e.g. .html).
@@ -67,31 +56,13 @@ function parseBlockStructure(htmlText) {
   return blocks;
 }
 
-/**
- * Fetch .plain.html for the given path and return block structure.
- * @param {string} origin - e.g. https://main--repo--org.preview.da.live
- * @param {string} pathWithoutOrgRepo - e.g. folder/page or folder/page.html
- * @returns {Promise<{ sectionIndex: number, blockName: string }[]>}
- */
-async function fetchBlockStructure(origin, pathWithoutOrgRepo) {
-  const pathNorm = pathWithoutOrgRepo.replace(/\.html$/i, '').trim();
-  if (!pathNorm) return [];
-  const encoded = pathNorm.split('/').map(encodeURIComponent).join('/');
-  const url = `${origin}/${encoded}.plain.html`;
-  const resp = await fetch(url, { method: 'GET' });
-  if (!resp.ok) return [];
-  const text = await resp.text();
-  return parseBlockStructure(text);
-}
-
 export default class PageOutline extends LitElement {
   static properties = {
     selectedPath: { type: String },
     org: { type: String },
     repo: { type: String },
+    plainHtml: { type: String },
     _blocks: { state: true },
-    _loading: { state: true },
-    _error: { state: true },
   };
 
   constructor() {
@@ -99,51 +70,21 @@ export default class PageOutline extends LitElement {
     this.selectedPath = '';
     this.org = '';
     this.repo = '';
+    this.plainHtml = '';
     this._blocks = [];
-    this._loading = false;
-    this._error = null;
   }
 
   get _isPage() {
     return isPagePath(this.selectedPath);
   }
 
-  get _pathWithoutOrgRepo() {
-    if (!this.selectedPath) return '';
-    const segments = this.selectedPath.replace(/^\//, '').split('/').filter(Boolean);
-    return segments.slice(2).join('/');
-  }
-
-  async _loadOutline() {
-    if (!this._isPage || !this.org || !this.repo) {
-      this._blocks = [];
-      this._error = null;
-      return;
-    }
-    const origin = previewOrigin(this.org, this.repo);
-    const pathWithoutOrgRepo = this._pathWithoutOrgRepo;
-    if (!origin || !pathWithoutOrgRepo) {
-      this._blocks = [];
-      return;
-    }
-    this._loading = true;
-    this._error = null;
-    this.requestUpdate();
-    try {
-      this._blocks = await fetchBlockStructure(origin, pathWithoutOrgRepo);
-    } catch (e) {
-      this._error = e?.message || 'Failed to load outline';
-      this._blocks = [];
-    } finally {
-      this._loading = false;
-      this.requestUpdate();
-    }
-  }
-
   updated(changed) {
     super.updated?.(changed);
-    if (changed.has('selectedPath') || changed.has('org') || changed.has('repo')) {
-      this._loadOutline();
+    if (changed.has('plainHtml')) {
+      this._blocks = this.plainHtml?.trim()
+        ? parseBlockStructure(this.plainHtml)
+        : [];
+      this.requestUpdate();
     }
   }
 
@@ -169,24 +110,6 @@ export default class PageOutline extends LitElement {
           <div class="page-outline-placeholder">
             Select a page (e.g. a .html file) to view its block outline.
           </div>
-        </div>
-      `;
-    }
-
-    if (this._error) {
-      return html`
-        <div class="page-outline">
-          <div class="page-outline-header">Page outline</div>
-          <div class="page-outline-error" role="alert">${this._error}</div>
-        </div>
-      `;
-    }
-
-    if (this._loading) {
-      return html`
-        <div class="page-outline">
-          <div class="page-outline-header">Page outline</div>
-          <div class="page-outline-placeholder">Loading…</div>
         </div>
       `;
     }

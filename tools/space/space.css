@@ -226,6 +226,32 @@
   overflow: hidden;
 }
 
+/* WYSIWYG-only view: hidden doc pane keeps da-inline-editor in DOM for controller=parent */
+.space .main-wysiwyg-with-controller {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.space .space-doc-pane-hidden {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.space .main-wysiwyg-with-controller .main-single-pane {
+  flex: 1;
+  min-width: 0;
+}
+
 .space .space-sidebar,
 .space .space-details {
   display: flex;

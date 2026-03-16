@@ -66,6 +66,7 @@ class Space extends LitElement {
     _collabUsers: { state: true },
     _quickEditPort: { state: true },
     _wysiwygCookieReady: { state: true },
+    _outlineHtml: { state: true },
   };
 
   constructor() {
@@ -73,6 +74,7 @@ class Space extends LitElement {
     this.projects = [];
     this._selectedPath = '';
     this._orgRepo = null;
+    this._outlineHtml = '';
     this._sidebarTab = 'files';
     this._viewMode = 'wysiwyg';
     this._chatOpen = true;
@@ -95,11 +97,18 @@ class Space extends LitElement {
     const path = hash.replace(/^#\/?/, '').trim();
     const pathSegments = path ? path.split('/').filter(Boolean) : [];
     this._selectedPath = pathSegments.length > 2 ? path : '';
+    this._outlineHtml = '';
   };
 
   _boundFileSelect = (e) => {
     const path = e.detail?.item?.path;
     this._selectedPath = typeof path === 'string' ? path.replace(/^\//, '') : '';
+    this._outlineHtml = '';
+  };
+
+  _onEditorHtmlChange = (body) => {
+    console.log('body', body);
+    this._outlineHtml = body ?? '';
   };
 
   _onViewModeChange = (e) => {
@@ -129,7 +138,7 @@ class Space extends LitElement {
 
   _onWysiwygIframeLoad = (e) => {
     const iframe = e?.target;
-    if (!iframe?.contentWindow || this._viewMode !== 'split' || !this._orgRepo || !this._selectedPath) return;
+    if (!iframe?.contentWindow || !this._orgRepo || !this._selectedPath) return;
 
     this._quickEditPort = null;
     if (this._quickEditInitRetryId) {
@@ -297,6 +306,7 @@ class Space extends LitElement {
       this._wysiwygCookieReady = false;
       this._wysiwygCookieRequestKey = requestKey;
       this._fetchWysiwygCookie(requestKey).catch((err) => {
+        this._wysiwygCookieReady = true;
         // eslint-disable-next-line no-console
         console.error('[da-space] gimme_cookie failed', err);
       });
@@ -318,7 +328,7 @@ class Space extends LitElement {
     const pathWithoutHtml = pathWithoutOrgRepo.replace(/\.html$/i, '');
     const encodedPath = pathWithoutHtml.split('/').map(encodeURIComponent).join('/');
     const base = `https://main--${repo}--${org}.preview.da.live/${encodedPath}?nx=exp-workspace&quick-edit=exp-workspace`;
-    return this._viewMode === 'split' ? `${base}&controller=parent` : base;
+    return `${base}&controller=parent`;
   }
 
   _renderDocPane() {
@@ -331,6 +341,7 @@ class Space extends LitElement {
             .repo="${this._orgRepo?.repo ?? ''}"
             .path="${this._selectedPath ?? ''}"
             .quickEditPort="${this._quickEditPort ?? null}"
+            .onEditorHtmlChange="${this._onEditorHtmlChange}"
           ></da-inline-editor>
         </div>
       </div>
@@ -366,7 +377,14 @@ class Space extends LitElement {
       return html`<div class="main-single-pane">${this._renderDocPane()}</div>`;
     }
     if (this._viewMode === 'wysiwyg') {
-      return html`<div class="main-single-pane">${this._renderWysiwygPane(iframeSrc)}</div>`;
+      return html`
+        <div class="main-wysiwyg-with-controller">
+          <div class="space-doc-pane-hidden" aria-hidden="true">
+            ${this._renderDocPane()}
+          </div>
+          <div class="main-single-pane">${this._renderWysiwygPane(iframeSrc)}</div>
+        </div>
+      `;
     }
     return html`
       <sp-split-view
@@ -516,6 +534,7 @@ class Space extends LitElement {
               .selectedPath="${this._selectedPath ?? ''}"
               .org="${this._orgRepo?.org ?? ''}"
               .repo="${this._orgRepo?.repo ?? ''}"
+              .plainHtml="${this._outlineHtml ?? ''}"
             ></da-page-outline>
           </div>
         </div>
