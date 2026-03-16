@@ -297,6 +297,7 @@ class Space extends LitElement {
       this._wysiwygCookieReady = false;
       this._wysiwygCookieRequestKey = requestKey;
       this._fetchWysiwygCookie(requestKey).catch((err) => {
+        this._wysiwygCookieReady = true;
         // eslint-disable-next-line no-console
         console.error('[da-space] gimme_cookie failed', err);
       });
