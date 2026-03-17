@@ -329,21 +329,17 @@ export class ChatController {
 
   toAgentMessages() {
     return this.messages
-      .filter((message) => (
-        (
-          typeof message.content === 'string'
-          && message.content.trim().length > 0
-          && message.content !== '...'
-        )
-        || extractTextFromParts(message.parts).trim().length > 0
-      ))
+      .filter((message) => {
+        const text = extractTextFromParts(message.parts) || message.content || '';
+        return text.trim().length > 0 && text.trim() !== '...';
+      })
       .map((message, index) => {
-        const textContent = message.content
-          || extractTextFromParts(message.parts)
-          || '';
-        const parts = Array.isArray(message.parts) && message.parts.length > 0
-          ? message.parts
-          : [{ type: 'text', text: textContent }];
+        const textContent = extractTextFromParts(message.parts) || message.content || '';
+        // Strip UI-only parts (tool-call state, output, etc.) — send only text parts.
+        const textParts = Array.isArray(message.parts)
+          ? message.parts.filter((p) => p?.type === 'text')
+          : [];
+        const parts = textParts.length > 0 ? textParts : [{ type: 'text', text: textContent }];
         return {
           id: message.id || `da-local-${index}`,
           role: message.role,
