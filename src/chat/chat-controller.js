@@ -64,7 +64,8 @@ function normalizeMessage(message) {
 
 export class ChatController {
   constructor(options = {}) {
-    this.host = options.host || 'da-agent.adobeaem.workers.dev';
+    const isLocal = new URLSearchParams(window.location.search).get('ref') === 'local';
+    this.host = options.host || (isLocal ? 'localhost:5173' : 'da-agent.adobeaem.workers.dev');
     this.room = options.name || 'default';
     this.getContext = options.getContext || (() => ({}));
     this.getImsToken = options.getImsToken || (() => null);
