@@ -1,3 +1,5 @@
+import { loadMessages, saveMessages, clearMessages } from './chat-idb-store.js';
+
 function normalizePath(path) {
   if (typeof path !== 'string') return '';
   return path
@@ -396,6 +398,7 @@ export class ChatController {
       }
 
       await this._readStream(response.body.getReader());
+      saveMessages(this.room, this.messages);
     } catch (e) {
       if (e.name === 'AbortError') return;
       this.isThinking = false;
@@ -406,6 +409,7 @@ export class ChatController {
         content: errorText,
         parts: [{ type: 'text', text: errorText }],
       }];
+      saveMessages(this.room, this.messages);
       this.onStatusChange(this.statusText);
       this.onUpdate();
     } finally {
@@ -425,6 +429,7 @@ export class ChatController {
   clearHistory() {
     this._abortController?.abort();
     this._abortController = null;
+    clearMessages(this.room);
     this.messages = [];
     this.activeAssistantIndex = null;
     this.isThinking = false;
@@ -435,19 +440,34 @@ export class ChatController {
   }
 
   async loadInitialMessages() {
+    let serverLoaded = false;
     try {
       const response = await fetch(`${this._chatUrl}/messages`, {
         method: 'GET',
         headers: { 'content-type': 'application/json' },
       });
-      if (!response.ok) return;
-      const text = await response.text();
-      if (!text.trim()) return;
-      const messages = JSON.parse(text);
-      if (!Array.isArray(messages)) return;
-      this.syncMessagesFromAgent(messages);
+      if (response.ok) {
+        const text = await response.text();
+        if (text.trim()) {
+          const messages = JSON.parse(text);
+          if (Array.isArray(messages) && messages.length > 0) {
+            this.syncMessagesFromAgent(messages);
+            saveMessages(this.room, this.messages);
+            serverLoaded = true;
+          }
+        }
+      }
     } catch {
-      // Ignore initial load failures.
+      // Ignore server load failures, fall through to IDB.
+    }
+
+    if (!serverLoaded) {
+      try {
+        const cached = await loadMessages(this.room);
+        if (cached.length > 0) this.syncMessagesFromAgent(cached);
+      } catch {
+        // IDB also unavailable — start with empty history.
+      }
     }
   }
 
