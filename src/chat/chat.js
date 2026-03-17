@@ -197,13 +197,13 @@ class Chat extends LitElement {
               <sp-button
                 variant="accent"
                 size="s"
-                ?disabled=${!approvalId || this._isThinking}
+                ?disabled=${!approvalId}
                 @click=${() => this._sendToolApproval(approvalId, true)}
               >Approve</sp-button>
               <sp-button
                 variant="negative"
                 size="s"
-                ?disabled=${!approvalId || this._isThinking}
+                ?disabled=${!approvalId}
                 @click=${() => this._sendToolApproval(approvalId, false)}
               >Reject</sp-button>
             </div>

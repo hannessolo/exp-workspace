@@ -138,6 +138,9 @@ export class ChatController {
       case 'tool-input-available':
         this._handleToolCallStart(event);
         break;
+      case 'tool-approval-request':
+        this._handleToolApprovalRequest(event);
+        break;
       case 'tool-output-available':
         this._handleToolResult({ toolCallId: event.toolCallId, result: event.output });
         break;
@@ -215,6 +218,31 @@ export class ChatController {
         toolCallId,
         toolName: toolName || '',
         state: 'input-available',
+      }],
+    };
+    this.messages = next;
+    this.onUpdate();
+  }
+
+  _handleToolApprovalRequest(data) {
+    if (!data || typeof data !== 'object') return;
+    const toolCallId = data.toolCallId || data.id;
+    if (!toolCallId) return;
+
+    this.ensureAssistantPlaceholder();
+    const idx = this.activeAssistantIndex;
+    if (idx === null) return;
+
+    const next = [...this.messages];
+    const existingParts = Array.isArray(next[idx]?.parts) ? next[idx].parts : [];
+    next[idx] = {
+      ...next[idx],
+      parts: [...existingParts, {
+        type: 'tool-call',
+        toolCallId,
+        toolName: data.toolName || '',
+        state: 'approval-requested',
+        approval: { id: data.id || toolCallId },
       }],
     };
     this.messages = next;
@@ -487,11 +515,37 @@ export class ChatController {
     return found;
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  addToolApprovalResponse({ id, approved }) {
-    // Tool approval requires a separate HTTP endpoint; not yet implemented.
-    // eslint-disable-next-line no-console
-    console.debug('[da-chat] addToolApprovalResponse: not supported over HTTP yet', { id, approved });
+  async addToolApprovalResponse({ id, approved }) {
+    const toolCallId = this.findToolCallIdByApprovalId(id);
+    if (!toolCallId) return;
+
+    // Optimistically update the part so the UI reflects the decision immediately.
+    const next = [...this.messages];
+    const msgIdx = next.findIndex((msg) => (
+      Array.isArray(msg.parts) && msg.parts.some((p) => p?.toolCallId === toolCallId)
+    ));
+    if (msgIdx >= 0) {
+      next[msgIdx] = {
+        ...next[msgIdx],
+        parts: next[msgIdx].parts.map((p) => (
+          p?.toolCallId === toolCallId
+            ? { ...p, state: approved ? 'input-available' : 'output-denied', approval: { ...p.approval, approved } }
+            : p
+        )),
+      };
+      this.messages = next;
+      this.onUpdate();
+    }
+
+    try {
+      await fetch(`${this._chatUrl}/approve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ toolCallId, approved }),
+      });
+    } catch {
+      // Ignore send failures — stream will time out or error on its own.
+    }
   }
 }
 
