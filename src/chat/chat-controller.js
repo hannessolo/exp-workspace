@@ -1,15 +1,3 @@
-import { AgentClient, agentFetch } from '../../deps/agent/dist/index.js';
-
-const MESSAGE_TYPE = {
-  CHAT_REQUEST: 'cf_agent_use_chat_request',
-  CHAT_RESPONSE: 'cf_agent_use_chat_response',
-  CHAT_REQUEST_CANCEL: 'cf_agent_chat_request_cancel',
-  CHAT_MESSAGES: 'cf_agent_chat_messages',
-  MESSAGE_UPDATED: 'cf_agent_message_updated',
-  CHAT_CLEAR: 'cf_agent_chat_clear',
-  TOOL_APPROVAL: 'cf_agent_tool_approval',
-};
-
 function normalizePath(path) {
   if (typeof path !== 'string') return '';
   return path
@@ -54,14 +42,6 @@ function extractTextFromParts(parts) {
     .join('');
 }
 
-function extractReasoningFromParts(parts) {
-  if (!Array.isArray(parts)) return '';
-  return parts
-    .filter((part) => part?.type === 'reasoning' && typeof part.text === 'string')
-    .map((part) => part.text)
-    .join('\n');
-}
-
 function normalizeMessage(message) {
   const rawParts = Array.isArray(message?.parts) ? message.parts : [];
   const content = extractTextFromParts(rawParts)
@@ -82,9 +62,8 @@ function normalizeMessage(message) {
 
 export class ChatController {
   constructor(options = {}) {
-    this.agentName = options.agent || 'ChatAgent';
-    this.host = options.host || 'da-agent.adobeaem.workers.dev';
-    this.agentRoom = options.name || 'default';
+    this.host = options.host || 'localhost:5173';
+    this.room = options.name || 'default';
     this.getContext = options.getContext || (() => ({}));
     this.getImsToken = options.getImsToken || (() => null);
 
@@ -93,229 +72,175 @@ export class ChatController {
     this.onConnectionChange = options.onConnectionChange || (() => {});
     this.onDocumentUpdated = options.onDocumentUpdated || (() => {});
 
-    this.agent = null;
     this.messages = [];
     this.connected = false;
     this.isThinking = false;
     this.statusText = '';
 
-    this.currentRequestId = null;
     this.activeAssistantIndex = null;
     this.processedUpdateToolCalls = new Set();
+    this._abortController = null;
+  }
 
-    this._onAgentOpen = this.handleAgentOpen.bind(this);
-    this._onAgentClose = this.handleAgentClose.bind(this);
-    this._onAgentMessage = this.handleAgentMessage.bind(this);
+  get _chatUrl() {
+    const protocol = this.host.startsWith('localhost') ? 'http' : 'https';
+    return `${protocol}://${this.host}/chat`;
   }
 
   connect() {
-    if (this.agent) return;
-
-    this.agent = new AgentClient({
-      agent: this.agentName,
-      host: this.host,
-      name: this.agentRoom,
-      onStateUpdate: (state, source) => {
-        // eslint-disable-next-line no-console
-        console.debug('[da-chat] onStateUpdate source:', source, 'state:', JSON.stringify(state));
-        this.handleStateUpdate(state);
-      },
-    });
-    this.agent.addEventListener('open', this._onAgentOpen);
-    this.agent.addEventListener('close', this._onAgentClose);
-    this.agent.addEventListener('message', this._onAgentMessage);
-  }
-
-  disconnect() {
-    if (!this.agent) return;
-
-    this.agent.removeEventListener('open', this._onAgentOpen);
-    this.agent.removeEventListener('close', this._onAgentClose);
-    this.agent.removeEventListener('message', this._onAgentMessage);
-    this.agent = null;
-
-    this.connected = false;
-    this.isThinking = false;
-    this.currentRequestId = null;
-    this.activeAssistantIndex = null;
-    this.statusText = 'Disconnected';
-
-    this.onConnectionChange(false);
-    this.onStatusChange(this.statusText);
-    this.onUpdate();
-  }
-
-  handleStateUpdate(state) {
-    if (!state || typeof state !== 'object') return;
-
-    // The agent may store messages in state.messages (Cloudflare Agents useChat pattern)
-    if (Array.isArray(state.messages)) {
-      // eslint-disable-next-line no-console
-      console.debug('[da-chat] state has messages:', state.messages.length, state.messages);
-      this.syncMessagesFromAgent(state.messages);
-    }
-  }
-
-  handleAgentOpen() {
+    if (this.connected) return;
     this.connected = true;
     this.statusText = 'Connected';
     this.onConnectionChange(true);
     this.onStatusChange(this.statusText);
     this.onUpdate();
-
     this.loadInitialMessages();
   }
 
-  handleAgentClose() {
+  disconnect() {
+    this._abortController?.abort();
+    this._abortController = null;
+
     this.connected = false;
+    this.isThinking = false;
+    this.activeAssistantIndex = null;
     this.statusText = 'Disconnected';
+
     this.onConnectionChange(false);
     this.onStatusChange(this.statusText);
     this.onUpdate();
   }
 
-  handleAgentMessage(event) {
-    if (typeof event.data !== 'string') return;
+  // ---------- stream reading ----------
 
-    let data;
+  _processStreamLine(rawLine) {
+    // Strip SSE "data: " prefix
+    const line = rawLine.startsWith('data: ') ? rawLine.slice(6) : rawLine;
+    if (!line.trim() || line === '[DONE]') return;
+
+    let event;
     try {
-      data = JSON.parse(event.data);
-    } catch (e) {
+      event = JSON.parse(line);
+    } catch {
       return;
     }
 
-    if (!data || typeof data !== 'object') return;
+    if (!event || typeof event !== 'object') return;
 
-    // eslint-disable-next-line no-console
-    console.debug('[da-chat] agent message:', data.type, data);
-
-    if (
-      data.type === MESSAGE_TYPE.CHAT_RESPONSE
-      && (data.id === this.currentRequestId || this.isThinking)
-    ) {
-      if (typeof data.body === 'string' && data.body.trim()) {
-        this.applyChatResponseBody(data.body);
-      }
-
-      if (data.error) {
+    switch (event.type) {
+      case 'text-delta':
+        if (typeof event.delta === 'string') this.appendToActiveAssistantMessage(event.delta);
+        break;
+      case 'tool-call':
+      case 'tool-input-available':
+        this._handleToolCallStart(event);
+        break;
+      case 'tool-output-available':
+        this._handleToolResult({ toolCallId: event.toolCallId, result: event.output });
+        break;
+      case 'error':
         this.isThinking = false;
-        this.currentRequestId = null;
         this.statusText = 'Error';
         this.onStatusChange(this.statusText);
         this.onUpdate();
-      } else if (data.done) {
-        this.isThinking = false;
-        this.currentRequestId = null;
-        this.statusText = 'Complete';
-        this.onStatusChange(this.statusText);
-        this.onUpdate();
-      }
-      return;
+        break;
+      case 'finish-message':
+      case 'finish':
+        if (this.isThinking) {
+          this.isThinking = false;
+          this.statusText = 'Complete';
+          this.onStatusChange(this.statusText);
+          this.onUpdate();
+        }
+        break;
+      default:
+        // text-start, start-step, finish-step — no action needed
+        break;
     }
-
-    if (data.type === MESSAGE_TYPE.MESSAGE_UPDATED && data.message) {
-      // eslint-disable-next-line no-console
-      console.debug('[da-chat] MESSAGE_UPDATED:', JSON.stringify(data.message));
-      this.updateAssistantFromMessage(data.message);
-      return;
-    }
-
-    if (data.type === MESSAGE_TYPE.CHAT_MESSAGES && Array.isArray(data.messages)) {
-      // eslint-disable-next-line no-console
-      console.debug('[da-chat] CHAT_MESSAGES count:', data.messages.length);
-      this.syncMessagesFromAgent(data.messages);
-      return;
-    }
-
-    if (data.type === MESSAGE_TYPE.CHAT_CLEAR) {
-      this.messages = [];
-      this.activeAssistantIndex = null;
-      this.processedUpdateToolCalls.clear();
-      this.onUpdate();
-      return;
-    }
-
-    // eslint-disable-next-line no-console
-    console.debug('[da-chat] unhandled message type:', data.type, data);
   }
 
-  applyChatResponseBody(body) {
-    let chunk;
+  async _readStream(reader) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+
     try {
-      chunk = JSON.parse(body);
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.debug('[da-chat] body is plain text, appending directly:', body);
-      this.appendToActiveAssistantMessage(body);
-      return;
-    }
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        // eslint-disable-next-line no-await-in-loop
+        const { done, value } = await reader.read();
+        if (done) break;
 
-    // eslint-disable-next-line no-console
-    console.debug('[da-chat] body chunk type:', chunk?.type, chunk);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
-    if (!chunk || typeof chunk !== 'object') return;
-
-    if (chunk.message) {
-      // eslint-disable-next-line no-console
-      console.debug('[da-chat] chunk.message path:', chunk.message);
-      this.updateAssistantFromMessage(chunk.message);
-      return;
-    }
-
-    if (typeof chunk.type === 'string' && chunk.type.includes('reasoning')) {
-      const reasoningText = (typeof chunk.delta === 'string' && chunk.delta)
-        || (typeof chunk.text === 'string' && chunk.text)
-        || (typeof chunk.reasoning === 'string' && chunk.reasoning)
-        || '';
-      if (reasoningText) {
-        this.statusText = 'Reasoning ...';
-        this.onStatusChange(this.statusText);
-        this.onUpdate();
+        lines.forEach((line) => {
+          if (line.trim()) this._processStreamLine(line);
+        });
       }
-      return;
+      if (buffer.trim()) this._processStreamLine(buffer);
+    } finally {
+      reader.releaseLock();
     }
 
-    if (
-      chunk.type === 'text-delta'
-      || chunk.type === 'text'
-      || chunk.type === 'delta'
-      || chunk.type === 'response.output_text.delta'
-    ) {
-      const textDelta = (typeof chunk.delta === 'string' && chunk.delta)
-        || (typeof chunk.text === 'string' && chunk.text)
-        || '';
-      if (textDelta) this.appendToActiveAssistantMessage(textDelta);
-      return;
+    // Ensure thinking state is cleared if the stream ended without a finish event
+    if (this.isThinking) {
+      this.isThinking = false;
+      this.statusText = 'Complete';
+      this.onStatusChange(this.statusText);
+      this.onUpdate();
     }
-
-    if (chunk.part && typeof chunk.part === 'object') {
-      if (chunk.part.type === 'reasoning' && typeof chunk.part.text === 'string') {
-        this.statusText = 'Reasoning ...';
-        this.onStatusChange(this.statusText);
-        this.onUpdate();
-        return;
-      }
-      if (chunk.part.type === 'text' && typeof chunk.part.text === 'string') {
-        this.appendToActiveAssistantMessage(chunk.part.text);
-        return;
-      }
-    }
-
-    if (Array.isArray(chunk.parts)) {
-      const text = extractTextFromParts(chunk.parts);
-      if (text) this.appendToActiveAssistantMessage(text);
-      const reasoning = extractReasoningFromParts(chunk.parts);
-      if (reasoning) {
-        this.statusText = 'Reasoning ...';
-        this.onStatusChange(this.statusText);
-        this.onUpdate();
-      }
-      return;
-    }
-
-    // eslint-disable-next-line no-console
-    console.debug('[da-chat] unhandled body chunk (no matching type):', chunk);
   }
+
+  // ---------- tool call helpers ----------
+
+  _handleToolCallStart(data) {
+    if (!data || typeof data !== 'object') return;
+    const { toolCallId, toolName } = data;
+    if (!toolCallId) return;
+
+    this.ensureAssistantPlaceholder();
+    const idx = this.activeAssistantIndex;
+    if (idx === null) return;
+
+    const next = [...this.messages];
+    const existingParts = Array.isArray(next[idx]?.parts) ? next[idx].parts : [];
+    next[idx] = {
+      ...next[idx],
+      parts: [...existingParts, {
+        type: 'tool-call',
+        toolCallId,
+        toolName: toolName || '',
+        state: 'input-available',
+      }],
+    };
+    this.messages = next;
+    this.onUpdate();
+  }
+
+  _handleToolResult(data) {
+    if (!data || typeof data !== 'object') return;
+    const { toolCallId, result } = data;
+    if (!toolCallId) return;
+
+    const next = [...this.messages];
+    const msgIdx = next.findIndex((msg) => (
+      Array.isArray(msg.parts)
+      && msg.parts.some((p) => p?.toolCallId === toolCallId)
+    ));
+    if (msgIdx < 0) return;
+
+    const parts = next[msgIdx].parts.map((p) => {
+      if (p?.toolCallId !== toolCallId) return p;
+      return { ...p, state: 'output-available', output: result };
+    });
+    next[msgIdx] = { ...next[msgIdx], parts };
+    this.messages = next;
+    this.notifyDocumentUpdated(parts);
+    this.onUpdate();
+  }
+
+  // ---------- message helpers ----------
 
   ensureAssistantPlaceholder() {
     if (this.activeAssistantIndex !== null) return;
@@ -351,10 +276,7 @@ export class ChatController {
       parts.push({ type: 'text', text: content });
     }
     next[idx] = {
-      ...next[idx],
-      role: 'assistant',
-      content,
-      parts,
+      ...next[idx], role: 'assistant', content, parts,
     };
     this.messages = next;
     this.onUpdate();
@@ -384,77 +306,8 @@ export class ChatController {
 
       if (toolCallId) this.processedUpdateToolCalls.add(toolCallId);
 
-      this.onDocumentUpdated({
-        toolName,
-        toolCallId,
-        path: targetPath,
-      });
+      this.onDocumentUpdated({ toolName, toolCallId, path: targetPath });
     });
-  }
-
-  updateAssistantFromMessage(message) {
-    const normalized = normalizeMessage(message);
-    const reasoning = extractReasoningFromParts(normalized.parts);
-    if (!normalized.content && normalized.parts.length === 0) return;
-    if (message.role === 'user') return;
-
-    const next = [...this.messages];
-    const updatedToolCallIds = new Set(
-      normalized.parts
-        .filter((part) => part && typeof part === 'object' && part.toolCallId)
-        .map((part) => part.toolCallId),
-    );
-
-    let replaceIndex = -1;
-
-    if (normalized.id) {
-      replaceIndex = next.findIndex((msg) => msg.id === normalized.id);
-    }
-
-    if (replaceIndex < 0 && updatedToolCallIds.size > 0) {
-      replaceIndex = next.findIndex((msg) => (
-        Array.isArray(msg.parts)
-        && msg.parts.some((part) => part && updatedToolCallIds.has(part.toolCallId))
-      ));
-    }
-
-    if (replaceIndex < 0 && this.activeAssistantIndex !== null) {
-      const active = next[this.activeAssistantIndex];
-      const isPlaceholder = !!active
-        && active.role === 'assistant'
-        && (active.content === '...' || !active.content)
-        && !active.id;
-      if (isPlaceholder) {
-        replaceIndex = this.activeAssistantIndex;
-      }
-    }
-
-    if (replaceIndex >= 0) {
-      const existing = next[replaceIndex];
-      next[replaceIndex] = {
-        ...existing,
-        ...normalized,
-        content: normalized.content || existing?.content || '',
-        parts: normalized.parts?.length > 0 ? normalized.parts : (existing?.parts || []),
-        id: existing?.id || normalized.id,
-      };
-      this.activeAssistantIndex = replaceIndex;
-    } else {
-      next.push({
-        ...normalized,
-        id: normalized.id || crypto.randomUUID(),
-      });
-      this.activeAssistantIndex = next.length - 1;
-    }
-
-    if (reasoning) {
-      this.statusText = 'Reasoning ...';
-      this.onStatusChange(this.statusText);
-    }
-
-    this.messages = next;
-    this.notifyDocumentUpdated(normalized.parts);
-    this.onUpdate();
   }
 
   syncMessagesFromAgent(agentMessages) {
@@ -469,27 +322,6 @@ export class ChatController {
     this.messages = nextMessages;
     this.activeAssistantIndex = null;
     this.onUpdate();
-  }
-
-  async loadInitialMessages() {
-    try {
-      const response = await agentFetch(
-        {
-          agent: this.agentName, host: this.host, name: this.agentRoom, path: 'get-messages',
-        },
-        { method: 'GET', headers: { 'content-type': 'application/json' } },
-      );
-      if (!response.ok) return;
-
-      const text = await response.text();
-      if (!text.trim()) return;
-
-      const messages = JSON.parse(text);
-      if (!Array.isArray(messages)) return;
-      this.syncMessagesFromAgent(messages);
-    } catch {
-      // Ignore initial load failures.
-    }
   }
 
   toAgentMessages() {
@@ -518,9 +350,11 @@ export class ChatController {
       });
   }
 
-  sendMessage(text) {
+  // ---------- public API ----------
+
+  async sendMessage(text) {
     const content = (text || '').trim();
-    if (!content || this.isThinking || !this.agent) return;
+    if (!content || this.isThinking || !this.connected) return;
 
     this.messages = [...this.messages, {
       role: 'user',
@@ -529,7 +363,6 @@ export class ChatController {
     }];
     this.isThinking = true;
     this.statusText = 'Thinking...';
-    this.currentRequestId = crypto.randomUUID().slice(0, 8);
     this.activeAssistantIndex = null;
 
     // Collect messages BEFORE adding the assistant placeholder so the agent
@@ -543,24 +376,29 @@ export class ChatController {
     this.onStatusChange(this.statusText);
     this.onUpdate();
 
+    this._abortController = new AbortController();
+
     try {
-      this.agent.send(JSON.stringify({
-        id: this.currentRequestId,
-        init: {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            messages: agentMessages,
-            trigger: 'text',
-            pageContext,
-            imsToken: this.getImsToken(),
-          }),
-        },
-        type: MESSAGE_TYPE.CHAT_REQUEST,
-      }));
+      const response = await fetch(this._chatUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          messages: agentMessages,
+          pageContext,
+          imsToken: this.getImsToken(),
+          room: this.room,
+        }),
+        signal: this._abortController.signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      await this._readStream(response.body.getReader());
     } catch (e) {
+      if (e.name === 'AbortError') return;
       this.isThinking = false;
-      this.currentRequestId = null;
       this.statusText = 'Error';
       const errorText = `Error: ${e.message || 'Failed to send message'}`;
       this.messages = [...this.messages, {
@@ -570,39 +408,47 @@ export class ChatController {
       }];
       this.onStatusChange(this.statusText);
       this.onUpdate();
+    } finally {
+      this._abortController = null;
     }
   }
 
   stop() {
-    if (!this.agent || !this.currentRequestId) return;
-
-    this.agent.send(JSON.stringify({
-      id: this.currentRequestId,
-      type: MESSAGE_TYPE.CHAT_REQUEST_CANCEL,
-    }));
-
-    this.currentRequestId = null;
+    this._abortController?.abort();
+    this._abortController = null;
     this.isThinking = false;
     this.statusText = 'Stopped';
-
     this.onStatusChange(this.statusText);
     this.onUpdate();
   }
 
   clearHistory() {
+    this._abortController?.abort();
+    this._abortController = null;
     this.messages = [];
     this.activeAssistantIndex = null;
-    this.currentRequestId = null;
     this.isThinking = false;
     this.statusText = '';
     this.processedUpdateToolCalls.clear();
-
-    if (this.agent) {
-      this.agent.send(JSON.stringify({ type: MESSAGE_TYPE.CHAT_CLEAR }));
-    }
-
     this.onStatusChange(this.statusText);
     this.onUpdate();
+  }
+
+  async loadInitialMessages() {
+    try {
+      const response = await fetch(`${this._chatUrl}/messages`, {
+        method: 'GET',
+        headers: { 'content-type': 'application/json' },
+      });
+      if (!response.ok) return;
+      const text = await response.text();
+      if (!text.trim()) return;
+      const messages = JSON.parse(text);
+      if (!Array.isArray(messages)) return;
+      this.syncMessagesFromAgent(messages);
+    } catch {
+      // Ignore initial load failures.
+    }
   }
 
   findToolCallIdByApprovalId(approvalId) {
@@ -624,18 +470,11 @@ export class ChatController {
     return found;
   }
 
+  // eslint-disable-next-line class-methods-use-this
   addToolApprovalResponse({ id, approved }) {
-    if (!this.agent) return;
-
-    const toolCallId = this.findToolCallIdByApprovalId(id);
-    if (!toolCallId) return;
-
-    this.agent.send(JSON.stringify({
-      type: MESSAGE_TYPE.TOOL_APPROVAL,
-      toolCallId,
-      approved: !!approved,
-      autoContinue: true,
-    }));
+    // Tool approval requires a separate HTTP endpoint; not yet implemented.
+    // eslint-disable-next-line no-console
+    console.debug('[da-chat] addToolApprovalResponse: not supported over HTTP yet', { id, approved });
   }
 }
 
