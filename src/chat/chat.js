@@ -46,6 +46,7 @@ class Chat extends LitElement {
     _messages: { state: true },
     _inputValue: { state: true },
     _isThinking: { state: true },
+    _isAwaitingApproval: { state: true },
     _statusText: { state: true },
     _skillsLibraryTab: { state: true },
   };
@@ -57,6 +58,7 @@ class Chat extends LitElement {
     this._messages = [];
     this._inputValue = '';
     this._isThinking = false;
+    this._isAwaitingApproval = false;
     this._statusText = '';
     this._skillsLibraryTab = 'skills';
     this._chatController = null;
@@ -92,6 +94,7 @@ class Chat extends LitElement {
       onUpdate: () => {
         this._messages = [...this._chatController.messages];
         this._isThinking = this._chatController.isThinking;
+        this._isAwaitingApproval = this._chatController.isAwaitingApproval;
         this._scrollMessagesToBottom();
       },
       onStatusChange: (statusText) => {
@@ -128,7 +131,7 @@ class Chat extends LitElement {
 
   _sendMessage() {
     const content = this._inputValue.trim();
-    if (!content || this._isThinking || !this._chatController) return;
+    if (!content || this._isThinking || this._isAwaitingApproval || !this._chatController) return;
     this._inputValue = '';
     this._chatController.sendMessage(content);
   }
@@ -141,13 +144,13 @@ class Chat extends LitElement {
     this._chatController?.clearHistory();
   }
 
-  _sendToolApproval(id, approved) {
-    if (!id || !this._chatController) return;
-    this._chatController.addToolApprovalResponse({ id, approved });
+  _sendToolApproval(toolCallId, approved) {
+    if (!toolCallId || !this._chatController) return;
+    this._chatController.approveToolCall({ toolCallId, approved });
   }
 
   _sendPrompt(prompt) {
-    if (!prompt || this._isThinking || !this._connected) return;
+    if (!prompt || this._isThinking || this._isAwaitingApproval || !this._connected) return;
     this._chatController?.sendMessage(prompt);
   }
 
@@ -168,7 +171,6 @@ class Chat extends LitElement {
       || part.type === 'tool'
       || (typeof part.type === 'string' && part.type.startsWith('tool-'))
       || part.toolCallId
-      || part.approval
     );
   }
 
@@ -177,34 +179,33 @@ class Chat extends LitElement {
     if (value) this._skillsLibraryTab = value;
   }
 
+  // eslint-disable-next-line class-methods-use-this
+  _renderToolArgs(args) {
+    if (!args || typeof args !== 'object') return '';
+    const text = JSON.stringify(args, null, 2);
+    return html`<pre class="approval-args">${text}</pre>`;
+  }
+
   _renderToolPart(part) {
     if (!this._isToolPart(part)) return '';
     const toolName = this._getToolName(part);
 
-    if (
-      part.approval
-      && (
-        part.state === 'approval-requested'
-        || typeof part.approval.approved === 'undefined'
-      )
-    ) {
-      const approvalId = part.approval?.id;
+    if (part.state === 'approval-requested') {
       return html`
         <div class="message-row assistant">
           <div class="message-bubble approval-bubble">
             <div class="approval-title"><strong>Approval needed:</strong> ${toolName}</div>
+            ${this._renderToolArgs(part.args)}
             <div class="approval-actions">
               <sp-button
                 variant="accent"
                 size="s"
-                ?disabled=${!approvalId}
-                @click=${() => this._sendToolApproval(approvalId, true)}
+                @click=${() => this._sendToolApproval(part.toolCallId, true)}
               >Approve</sp-button>
               <sp-button
                 variant="negative"
                 size="s"
-                ?disabled=${!approvalId}
-                @click=${() => this._sendToolApproval(approvalId, false)}
+                @click=${() => this._sendToolApproval(part.toolCallId, false)}
               >Reject</sp-button>
             </div>
           </div>
@@ -212,7 +213,7 @@ class Chat extends LitElement {
       `;
     }
 
-    if (part.state === 'output-denied' || part.approval?.approved === false) {
+    if (part.state === 'output-denied') {
       return html`
         <div class="message-row assistant">
           <div class="message-bubble tool-bubble">
@@ -354,7 +355,7 @@ class Chat extends LitElement {
             label="Message"
             placeholder="Send a message..."
             .value=${this._inputValue}
-            ?disabled=${this._isThinking || !this._connected}
+            ?disabled=${this._isThinking || this._isAwaitingApproval || !this._connected}
             @input=${this._handleInput}
             @keydown=${this._handleKeyDown}
           ></sp-textfield>
@@ -362,7 +363,7 @@ class Chat extends LitElement {
     ? html`<sp-button variant="secondary" @click=${this._stopRequest}>Stop</sp-button>`
     : html`<sp-button
                 variant="accent"
-                ?disabled=${!this._inputValue.trim() || !this._connected}
+                ?disabled=${!this._inputValue.trim() || !this._connected || this._isAwaitingApproval}
                 @click=${this._sendMessage}
               >Send</sp-button>`}
         </div>

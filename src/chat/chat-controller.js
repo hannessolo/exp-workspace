@@ -1,5 +1,12 @@
 import { loadMessages, saveMessages, clearMessages } from './chat-idb-store.js';
 
+// Tools that require explicit user approval before execution.
+// Update this list to match the destructive/sensitive tools in the da-agent.
+const APPROVAL_REQUIRED_TOOLS = new Set([
+  'da_update_source',
+  'da_delete',
+]);
+
 function normalizePath(path) {
   if (typeof path !== 'string') return '';
   return path
@@ -45,11 +52,18 @@ function extractTextFromParts(parts) {
 }
 
 function normalizeMessage(message) {
+  // Tool-result messages have an array content — preserve them as-is.
+  if (message?.role === 'tool') {
+    return {
+      id: message?.id,
+      role: 'tool',
+      content: Array.isArray(message.content) ? message.content : [],
+      parts: [],
+    };
+  }
   const rawParts = Array.isArray(message?.parts) ? message.parts : [];
   const content = extractTextFromParts(rawParts)
     || (typeof message?.content === 'string' ? message.content : '');
-  // When the agent sends content without parts, synthesize a text part so the
-  // merge in updateAssistantFromMessage doesn't fall back to the placeholder parts.
   let parts = rawParts;
   if (rawParts.length === 0 && content) {
     parts = [{ type: 'text', text: content }];
@@ -78,10 +92,12 @@ export class ChatController {
     this.messages = [];
     this.connected = false;
     this.isThinking = false;
+    this.isAwaitingApproval = false;
     this.statusText = '';
 
     this.activeAssistantIndex = null;
     this.processedUpdateToolCalls = new Set();
+    this._pendingApprovalIds = new Set();
     this._abortController = null;
   }
 
@@ -90,14 +106,27 @@ export class ChatController {
     return `${protocol}://${this.host}/chat`;
   }
 
-  connect() {
+  async connect() {
     if (this.connected) return;
-    this.connected = true;
-    this.statusText = 'Connected';
-    this.onConnectionChange(true);
+
+    try {
+      // Any HTTP response means the server is reachable; only a network error means it isn't.
+      await fetch(this._chatUrl, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(5000),
+      });
+      this.connected = true;
+      this.statusText = 'Connected';
+    } catch {
+      this.connected = false;
+      this.statusText = 'Disconnected';
+    }
+
+    this.onConnectionChange(this.connected);
     this.onStatusChange(this.statusText);
     this.onUpdate();
-    this.loadInitialMessages();
+
+    if (this.connected) this.loadInitialMessages();
   }
 
   disconnect() {
@@ -106,6 +135,8 @@ export class ChatController {
 
     this.connected = false;
     this.isThinking = false;
+    this.isAwaitingApproval = false;
+    this._pendingApprovalIds.clear();
     this.activeAssistantIndex = null;
     this.statusText = 'Disconnected';
 
@@ -138,9 +169,6 @@ export class ChatController {
       case 'tool-input-available':
         this._handleToolCallStart(event);
         break;
-      case 'tool-approval-request':
-        this._handleToolApprovalRequest(event);
-        break;
       case 'tool-output-available':
         this._handleToolResult({ toolCallId: event.toolCallId, result: event.output });
         break;
@@ -154,7 +182,12 @@ export class ChatController {
       case 'finish':
         if (this.isThinking) {
           this.isThinking = false;
-          this.statusText = 'Complete';
+          if (this._pendingApprovalIds.size > 0) {
+            this.isAwaitingApproval = true;
+            this.statusText = 'Approval required';
+          } else {
+            this.statusText = 'Complete';
+          }
           this.onStatusChange(this.statusText);
           this.onUpdate();
         }
@@ -189,10 +222,15 @@ export class ChatController {
       reader.releaseLock();
     }
 
-    // Ensure thinking state is cleared if the stream ended without a finish event
+    // Fallback: clear thinking state if no finish event arrived
     if (this.isThinking) {
       this.isThinking = false;
-      this.statusText = 'Complete';
+      if (this._pendingApprovalIds.size > 0) {
+        this.isAwaitingApproval = true;
+        this.statusText = 'Approval required';
+      } else {
+        this.statusText = 'Complete';
+      }
       this.onStatusChange(this.statusText);
       this.onUpdate();
     }
@@ -202,8 +240,13 @@ export class ChatController {
 
   _handleToolCallStart(data) {
     if (!data || typeof data !== 'object') return;
-    const { toolCallId, toolName } = data;
+    const {
+      toolCallId, toolName, args, input,
+    } = data;
     if (!toolCallId) return;
+
+    const needsApproval = APPROVAL_REQUIRED_TOOLS.has(toolName);
+    if (needsApproval) this._pendingApprovalIds.add(toolCallId);
 
     this.ensureAssistantPlaceholder();
     const idx = this.activeAssistantIndex;
@@ -217,32 +260,8 @@ export class ChatController {
         type: 'tool-call',
         toolCallId,
         toolName: toolName || '',
-        state: 'input-available',
-      }],
-    };
-    this.messages = next;
-    this.onUpdate();
-  }
-
-  _handleToolApprovalRequest(data) {
-    if (!data || typeof data !== 'object') return;
-    const toolCallId = data.toolCallId || data.id;
-    if (!toolCallId) return;
-
-    this.ensureAssistantPlaceholder();
-    const idx = this.activeAssistantIndex;
-    if (idx === null) return;
-
-    const next = [...this.messages];
-    const existingParts = Array.isArray(next[idx]?.parts) ? next[idx].parts : [];
-    next[idx] = {
-      ...next[idx],
-      parts: [...existingParts, {
-        type: 'tool-call',
-        toolCallId,
-        toolName: data.toolName || '',
-        state: 'approval-requested',
-        approval: { id: data.id || toolCallId },
+        state: needsApproval ? 'approval-requested' : 'input-available',
+        args: args ?? input ?? null,
       }],
     };
     this.messages = next;
@@ -345,6 +364,14 @@ export class ChatController {
     const nextMessages = [];
 
     agentMessages.forEach((message) => {
+      if (message?.role === 'tool') {
+        if (Array.isArray(message.content) && message.content.length > 0) {
+          nextMessages.push({
+            id: message?.id, role: 'tool', content: message.content, parts: [],
+          });
+        }
+        return;
+      }
       const normalized = normalizeMessage(message);
       if (!normalized.content && normalized.parts.length === 0) return;
       nextMessages.push(normalized);
@@ -358,10 +385,19 @@ export class ChatController {
   toAgentMessages() {
     return this.messages
       .filter((message) => {
+        if (message.role === 'tool') return true;
         const text = extractTextFromParts(message.parts) || message.content || '';
         return text.trim().length > 0 && text.trim() !== '...';
       })
       .map((message, index) => {
+        // Tool-result messages: pass content array through unchanged.
+        if (message.role === 'tool') {
+          return {
+            id: message.id || `da-local-${index}`,
+            role: 'tool',
+            content: message.content,
+          };
+        }
         const textContent = extractTextFromParts(message.parts) || message.content || '';
         // Strip UI-only parts (tool-call state, output, etc.) — send only text parts.
         const textParts = Array.isArray(message.parts)
@@ -381,7 +417,7 @@ export class ChatController {
 
   async sendMessage(text) {
     const content = (text || '').trim();
-    if (!content || this.isThinking || !this.connected) return;
+    if (!content || this.isThinking || this.isAwaitingApproval || !this.connected) return;
 
     this.messages = [...this.messages, {
       role: 'user',
@@ -392,8 +428,57 @@ export class ChatController {
     this.statusText = 'Thinking...';
     this.activeAssistantIndex = null;
 
-    // Collect messages BEFORE adding the assistant placeholder so the agent
-    // never receives a conversation that ends with the '...' placeholder.
+    await this._resumeWithMessages();
+  }
+
+  async approveToolCall({ toolCallId, approved }) {
+    if (!this._pendingApprovalIds.has(toolCallId)) return;
+    this._pendingApprovalIds.delete(toolCallId);
+
+    // Update the part state to reflect the user's decision.
+    const next = [...this.messages];
+    const msgIdx = next.findIndex((msg) => (
+      Array.isArray(msg.parts) && msg.parts.some((p) => p?.toolCallId === toolCallId)
+    ));
+    if (msgIdx >= 0) {
+      next[msgIdx] = {
+        ...next[msgIdx],
+        parts: next[msgIdx].parts.map((p) => (
+          p?.toolCallId === toolCallId
+            ? { ...p, state: approved ? 'input-available' : 'output-denied' }
+            : p
+        )),
+      };
+      this.messages = next;
+    }
+
+    // Append the tool-result message that the server expects.
+    this.messages = [...this.messages, {
+      role: 'tool',
+      content: [{ type: 'tool-result', toolCallId, result: { approved } }],
+      parts: [],
+    }];
+
+    if (this._pendingApprovalIds.size > 0) {
+      // More approvals still pending — just update the UI.
+      this.onUpdate();
+      return;
+    }
+
+    // All approvals resolved — resume the conversation.
+    this.isAwaitingApproval = false;
+    this.isThinking = true;
+    this.statusText = 'Thinking...';
+    this.activeAssistantIndex = null;
+    this.onStatusChange(this.statusText);
+    this.onUpdate();
+
+    await this._resumeWithMessages();
+  }
+
+  async _resumeWithMessages() {
+    // Snapshot messages before adding the placeholder so the agent never
+    // receives a conversation that ends with the '...' placeholder.
     const agentMessages = this.toAgentMessages();
     const pageContext = this.getContext();
     // eslint-disable-next-line no-console
@@ -418,15 +503,23 @@ export class ChatController {
         signal: this._abortController.signal,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       await this._readStream(response.body.getReader());
-      saveMessages(this.room, this.messages);
+
+      if (!this.isAwaitingApproval) {
+        saveMessages(this.room, this.messages);
+      }
     } catch (e) {
       if (e.name === 'AbortError') return;
       this.isThinking = false;
+      this.isAwaitingApproval = false;
+      this._pendingApprovalIds.clear();
+      const isNetworkError = e instanceof TypeError;
+      if (isNetworkError) {
+        this.connected = false;
+        this.onConnectionChange(false);
+      }
       this.statusText = 'Error';
       const errorText = `Error: ${e.message || 'Failed to send message'}`;
       this.messages = [...this.messages, {
@@ -446,6 +539,8 @@ export class ChatController {
     this._abortController?.abort();
     this._abortController = null;
     this.isThinking = false;
+    this.isAwaitingApproval = false;
+    this._pendingApprovalIds.clear();
     this.statusText = 'Stopped';
     this.onStatusChange(this.statusText);
     this.onUpdate();
@@ -458,6 +553,8 @@ export class ChatController {
     this.messages = [];
     this.activeAssistantIndex = null;
     this.isThinking = false;
+    this.isAwaitingApproval = false;
+    this._pendingApprovalIds.clear();
     this.statusText = '';
     this.processedUpdateToolCalls.clear();
     this.onStatusChange(this.statusText);
@@ -465,86 +562,11 @@ export class ChatController {
   }
 
   async loadInitialMessages() {
-    let serverLoaded = false;
     try {
-      const response = await fetch(`${this._chatUrl}/messages`, {
-        method: 'GET',
-        headers: { 'content-type': 'application/json' },
-      });
-      if (response.ok) {
-        const text = await response.text();
-        if (text.trim()) {
-          const messages = JSON.parse(text);
-          if (Array.isArray(messages) && messages.length > 0) {
-            this.syncMessagesFromAgent(messages);
-            saveMessages(this.room, this.messages);
-            serverLoaded = true;
-          }
-        }
-      }
+      const cached = await loadMessages(this.room);
+      if (cached.length > 0) this.syncMessagesFromAgent(cached);
     } catch {
-      // Ignore server load failures, fall through to IDB.
-    }
-
-    if (!serverLoaded) {
-      try {
-        const cached = await loadMessages(this.room);
-        if (cached.length > 0) this.syncMessagesFromAgent(cached);
-      } catch {
-        // IDB also unavailable — start with empty history.
-      }
-    }
-  }
-
-  findToolCallIdByApprovalId(approvalId) {
-    if (!approvalId) return null;
-
-    const found = this.messages.reduce((acc, message) => {
-      if (acc) return acc;
-      if (!Array.isArray(message.parts)) return acc;
-      const matchedPart = message.parts.find(
-        (part) => part
-          && typeof part === 'object'
-          && part.toolCallId
-          && part.approval
-          && part.approval.id === approvalId,
-      );
-      return matchedPart ? matchedPart.toolCallId : acc;
-    }, null);
-
-    return found;
-  }
-
-  async addToolApprovalResponse({ id, approved }) {
-    const toolCallId = this.findToolCallIdByApprovalId(id);
-    if (!toolCallId) return;
-
-    // Optimistically update the part so the UI reflects the decision immediately.
-    const next = [...this.messages];
-    const msgIdx = next.findIndex((msg) => (
-      Array.isArray(msg.parts) && msg.parts.some((p) => p?.toolCallId === toolCallId)
-    ));
-    if (msgIdx >= 0) {
-      next[msgIdx] = {
-        ...next[msgIdx],
-        parts: next[msgIdx].parts.map((p) => (
-          p?.toolCallId === toolCallId
-            ? { ...p, state: approved ? 'input-available' : 'output-denied', approval: { ...p.approval, approved } }
-            : p
-        )),
-      };
-      this.messages = next;
-      this.onUpdate();
-    }
-
-    try {
-      await fetch(`${this._chatUrl}/approve`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ toolCallId, approved }),
-      });
-    } catch {
-      // Ignore send failures — stream will time out or error on its own.
+      // IDB unavailable — start with empty history.
     }
   }
 }
