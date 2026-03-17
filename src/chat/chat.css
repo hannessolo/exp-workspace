@@ -222,6 +222,7 @@
   flex-shrink: 0;
   width: 160px;
   border-right: 1px solid var(--spectrum-neutral-border-color, #e0e0e0);
+  padding-right: 16px;
 }
 
 .chat-skills-content {
@@ -232,6 +233,7 @@
   align-items: center;
   justify-content: center;
   padding: 2rem;
+  min-width: 400px;
 }
 
 .chat-skills-empty {
