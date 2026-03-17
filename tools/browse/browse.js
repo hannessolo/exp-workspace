@@ -207,7 +207,8 @@ class BrowseView extends LitElement {
   _onEdit() {
     const pathKey = this._singleSelectedPathKey;
     if (!pathKey || !setHref) return;
-    const href = `https://da.live/app/hannessolo/exp-workspace/space#/${pathKey}`;
+    const search = window.location.search || '';
+    const href = `https://da.live/app/hannessolo/exp-workspace/space${search}#/${pathKey}`;
     setHref(href);
   }
 

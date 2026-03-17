@@ -14,7 +14,8 @@ import './file-history.js';
 import './page-metadata.js';
 
 const style = await getStyle(import.meta.url);
-const { token } = await DA_SDK;
+const { token, actions } = await DA_SDK;
+const setHref = actions?.setHref;
 
 const AEM_ORIGIN = 'https://admin.hlx.page';
 
@@ -149,6 +150,32 @@ class Space extends LitElement {
     this._sidebarTab = 'files';
     const hash = pathKey.startsWith('/') ? pathKey : `/${pathKey}`;
     window.location.hash = `#${hash}`;
+  }
+
+  /** Folder path for "back to browse": parent if file selected, else current folder. */
+  get _browseBackFolderPath() {
+    const path = (this._selectedPath || '').replace(/^\//, '').trim();
+    if (path) {
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length < 2) return null; // need at least org/repo
+      if (isHtmlPath(path)) {
+        segments.pop();
+        return segments.join('/');
+      }
+      return path;
+    }
+    if (this._orgRepo) return `${this._orgRepo.org}/${this._orgRepo.repo}`;
+    return null;
+  }
+
+  _onBreadcrumbBack() {
+    const folderPath = this._browseBackFolderPath;
+    if (!folderPath) return;
+    const search = window.location.search || '';
+    const base = 'https://da.live/app/hannessolo/exp-workspace/browse';
+    const href = `${base}${search}#/${folderPath}`;
+    if (setHref) setHref(href);
+    else window.location.assign(href);
   }
 
   get _breadcrumbSegments() {
@@ -483,6 +510,22 @@ class Space extends LitElement {
     return html`<span class="space-breadcrumb-crumb space-breadcrumb-current">${name}</span>`;
   }
 
+  _renderBreadcrumbBackButton() {
+    if (!this._browseBackFolderPath) return '';
+    return html`
+      <button
+        type="button"
+        class="space-breadcrumb-back"
+        aria-label="Back to browse"
+        @click="${this._onBreadcrumbBack}"
+      >
+        <svg class="space-breadcrumb-back-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>
+        </svg>
+      </button>
+    `;
+  }
+
   _renderBreadcrumbs() {
     const segments = this._breadcrumbSegments;
     if (segments.length === 0) {
@@ -629,6 +672,7 @@ class Space extends LitElement {
       <div class="space">
         <nav class="space-top-nav" aria-label="Toolbar">
           <div class="space-nav-left">
+            ${this._renderBreadcrumbBackButton()}
             ${this._renderBreadcrumbs()}
           </div>
           <div class="space-nav-center">
