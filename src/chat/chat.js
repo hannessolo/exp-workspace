@@ -50,6 +50,7 @@ class Chat extends LitElement {
     _isAwaitingApproval: { state: true },
     _statusText: { state: true },
     _skillsLibraryTab: { state: true },
+    _openToolCards: { state: true },
   };
 
   constructor() {
@@ -63,6 +64,7 @@ class Chat extends LitElement {
     this._isAwaitingApproval = false;
     this._statusText = '';
     this._skillsLibraryTab = 'skills';
+    this._openToolCards = new Set();
     this._chatController = null;
   }
 
@@ -181,11 +183,15 @@ class Chat extends LitElement {
     if (value) this._skillsLibraryTab = value;
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  _renderToolArgs(args) {
-    if (!args || typeof args !== 'object') return '';
-    const text = JSON.stringify(args, null, 2);
-    return html`<pre class="approval-args">${text}</pre>`;
+  _toggleToolCard(toolCallId) {
+    if (!toolCallId) return;
+    const next = new Set(this._openToolCards);
+    if (next.has(toolCallId)) {
+      next.delete(toolCallId);
+    } else {
+      next.add(toolCallId);
+    }
+    this._openToolCards = next;
   }
 
   /**
@@ -212,62 +218,68 @@ class Chat extends LitElement {
 
   _renderToolPart(part) {
     if (!this._isToolPart(part)) return '';
+
     const toolName = this._getToolName(part);
+    const {
+      state, toolCallId, args, output,
+    } = part;
 
-    if (part.state === 'approval-requested') {
-      return html`
-        <div class="message-row assistant">
-          <div class="message-bubble approval-bubble">
-            <div class="approval-title"><strong>Approval needed:</strong> ${toolName}</div>
-            ${this._renderToolArgs(part.args)}
-            <div class="approval-actions">
-              <sp-button
-                variant="accent"
-                size="s"
-                @click=${() => this._sendToolApproval(part.toolCallId, true)}
-              >Approve</sp-button>
-              <sp-button
-                variant="negative"
-                size="s"
-                @click=${() => this._sendToolApproval(part.toolCallId, false)}
-              >Reject</sp-button>
-            </div>
-          </div>
-        </div>
-      `;
+    const isApproval = state === 'approval-requested';
+    const isRejected = state === 'output-denied';
+    const isDone = state === 'output-available';
+    const isError = isDone && output && (output.error || ('success' in output && !output.success));
+    const isOpen = this._openToolCards?.has(toolCallId);
+
+    const icon = isApproval ? '⚠️' : '🔧';
+
+    let statusText = 'running';
+    let statusClass = 'running';
+    if (isApproval) {
+      statusText = 'needs approval';
+      statusClass = 'approval';
+    } else if (isRejected) {
+      statusText = 'rejected';
+      statusClass = 'rejected';
+    } else if (isError) {
+      statusText = 'error';
+      statusClass = 'error';
+    } else if (isDone) {
+      statusText = 'done';
+      statusClass = 'ok';
     }
 
-    if (part.state === 'output-denied') {
-      return html`
-        <div class="message-row assistant">
-          <div class="message-bubble tool-bubble">
-            <strong>${toolName}</strong>: Rejected
-          </div>
-        </div>
-      `;
-    }
+    // eslint-disable-next-line no-nested-ternary
+    const cardStateClass = isApproval ? 'needs-approval' : (isError || isRejected ? 'error' : (isDone ? 'done' : ''));
 
-    if (part.state === 'output-available') {
-      return html`
-        <div class="message-row assistant">
-          <div class="message-bubble tool-bubble">
-            <strong>${toolName}</strong>: Done
-          </div>
-        </div>
-      `;
-    }
+    const inputText = args && typeof args === 'object' ? JSON.stringify(args, null, 2) : null;
+    const outputText = output ? JSON.stringify(output, null, 2) : null;
 
-    if (part.state === 'input-available' || part.state === 'input-streaming') {
-      return html`
-        <div class="message-row assistant">
-          <div class="message-bubble tool-bubble">
-            Running ${toolName}…
-          </div>
+    return html`
+      <div class="tool-card ${cardStateClass} ${isOpen ? 'open' : ''}">
+        <div class="tool-summary" @click=${() => this._toggleToolCard(toolCallId)}>
+          <span class="tool-icon">${icon}</span>
+          <span class="tool-name-label">${toolName}</span>
+          <span class="tool-status ${statusClass}">${statusText}</span>
+          <span class="tool-chevron">▶</span>
         </div>
-      `;
-    }
-
-    return '';
+        <div class="tool-body">
+          ${inputText ? html`
+            <div class="tool-section-label">Input</div>
+            <pre class="tool-code">${inputText}</pre>
+          ` : ''}
+          ${outputText ? html`
+            <div class="tool-section-label">Output</div>
+            <pre class="tool-code output">${outputText}</pre>
+          ` : ''}
+        </div>
+        ${isApproval ? html`
+          <div class="approval-footer">
+            <button class="btn-approve" @click=${() => this._sendToolApproval(toolCallId, true)}>Approve</button>
+            <button class="btn-reject" @click=${() => this._sendToolApproval(toolCallId, false)}>Reject</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
   }
 
   _renderWelcome() {

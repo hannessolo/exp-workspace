@@ -1,10 +1,11 @@
 import { loadMessages, saveMessages, clearMessages } from './chat-idb-store.js';
 
 // Tools that require explicit user approval before execution.
-// Update this list to match the destructive/sensitive tools in the da-agent.
 const APPROVAL_REQUIRED_TOOLS = new Set([
+  'da_create_source',
   'da_update_source',
-  'da_delete',
+  'da_delete_source',
+  'da_move_content',
 ]);
 
 function normalizePath(path) {
@@ -162,12 +163,17 @@ export class ChatController {
     if (!event || typeof event !== 'object') return;
 
     switch (event.type) {
-      case 'text-delta':
-        if (typeof event.delta === 'string') this.appendToActiveAssistantMessage(event.delta);
+      case 'text-delta': {
+        const delta = event.delta ?? event.textDelta ?? event.text;
+        if (typeof delta === 'string') this.appendToActiveAssistantMessage(delta);
         break;
+      }
       case 'tool-call':
       case 'tool-input-available':
         this._handleToolCallStart(event);
+        break;
+      case 'tool-approval-request':
+        this._handleToolApprovalRequest(event);
         break;
       case 'tool-output-available':
         this._handleToolResult({ toolCallId: event.toolCallId, result: event.output });
@@ -262,9 +268,70 @@ export class ChatController {
         toolName: toolName || '',
         state: needsApproval ? 'approval-requested' : 'input-available',
         args: args ?? input ?? null,
+        // approvalId may come from the server; fall back to toolCallId for client-gated tools.
+        approval: needsApproval ? { id: data.approvalId || toolCallId } : undefined,
       }],
     };
     this.messages = next;
+    this.onUpdate();
+  }
+
+  _handleToolApprovalRequest(event) {
+    if (!event || typeof event !== 'object') return;
+
+    // Support both flat format (toolCallId/toolName at event top level, as sent by da-agent)
+    // and legacy nested toolCall format.
+    const nested = event.toolCall || {};
+    const toolCallId = event.toolCallId || nested.toolCallId || event.approvalId;
+    const toolName = event.toolName || nested.toolName || '';
+    const approvalId = event.approvalId || toolCallId;
+    const args = event.input ?? event.args ?? nested.input ?? nested.args ?? null;
+
+    if (!toolCallId) return;
+
+    this._pendingApprovalIds.add(toolCallId);
+
+    // If a tool-call part already exists (created by _handleToolCallStart on tool-input-available),
+    // just update it with the real approvalId rather than creating a duplicate.
+    const next = [...this.messages];
+    const msgIdx = next.findIndex((msg) => (
+      Array.isArray(msg.parts) && msg.parts.some((p) => p?.toolCallId === toolCallId)
+    ));
+    if (msgIdx >= 0) {
+      next[msgIdx] = {
+        ...next[msgIdx],
+        parts: next[msgIdx].parts.map((p) => (
+          p?.toolCallId === toolCallId
+            ? { ...p, state: 'approval-requested', approval: { id: approvalId } }
+            : p
+        )),
+      };
+      this.messages = next;
+      this.onUpdate();
+      return;
+    }
+
+    // No existing part — create one (fallback if tool-input-available wasn't received).
+    this.ensureAssistantPlaceholder();
+    const idx = this.activeAssistantIndex;
+    if (idx === null) return;
+
+    const existingParts = Array.isArray(this.messages[idx]?.parts) ? this.messages[idx].parts : [];
+    this.messages = [
+      ...this.messages.slice(0, idx),
+      {
+        ...this.messages[idx],
+        parts: [...existingParts, {
+          type: 'tool-call',
+          toolCallId,
+          toolName,
+          state: 'approval-requested',
+          args,
+          approval: { id: approvalId },
+        }],
+      },
+      ...this.messages.slice(idx + 1),
+    ];
     this.onUpdate();
   }
 
@@ -452,10 +519,19 @@ export class ChatController {
       this.messages = next;
     }
 
-    // Append the tool-result message that the server expects.
+    // Find the approval ID stored on the part (may differ from toolCallId).
+    let approvalId = toolCallId;
+    this.messages.forEach((msg) => {
+      if (!Array.isArray(msg.parts)) return;
+      msg.parts.forEach((p) => {
+        if (p?.toolCallId === toolCallId && p?.approval?.id) approvalId = p.approval.id;
+      });
+    });
+
+    // Append the tool-approval-response message the Vercel AI SDK expects.
     this.messages = [...this.messages, {
       role: 'tool',
-      content: [{ type: 'tool-result', toolCallId, result: { approved } }],
+      content: [{ type: 'tool-approval-response', approvalId, approved }],
       parts: [],
     }];
 

@@ -177,39 +177,122 @@
   color: #222;
 }
 
-/* Tool bubbles (running / done / rejected) */
+/* ── Tool cards (expandable) ──────────────────────────────── */
 
-.tool-bubble {
-  font-size: 12px;
-  color: #555;
-  background: #f9f9fb;
-  border: 1px solid #eaeaec;
-}
-
-/* Approval bubbles */
-
-.approval-bubble {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 8px;
-  padding: 10px 14px;
-}
-
-.approval-title {
-  width: 100%;
-  text-align: center;
+.tool-card {
+  align-self: flex-start;
+  width: min(480px, 88%);
+  border: 1px solid #d0d0d0;
+  border-radius: 10px;
   font-size: 13px;
+  overflow: hidden;
+  background: #fff;
 }
 
-.approval-actions {
+.tool-card.needs-approval { border-color: #f5a623; }
+.tool-card.done           { border-color: #d0d0d0; }
+.tool-card.error          { border-color: #e57373; }
+
+.tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  background: #f7f7f7;
+  border-bottom: 1px solid transparent;
+  transition: background 0.1s;
+  min-height: 40px;
+}
+
+.tool-summary:hover { background: #efefef; }
+.tool-card.open .tool-summary { border-bottom-color: #e0e0e0; }
+
+.tool-icon { font-size: 14px; line-height: 1; flex-shrink: 0; }
+.tool-name-label { font-weight: 600; color: #333; flex: 1; font-size: 12px; }
+
+.tool-status {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.tool-status.running  { background: #e3f2fd; color: #1565c0; }
+.tool-status.ok       { background: #e8f5e9; color: #2e7d32; }
+.tool-status.approval { background: #fff3e0; color: #e65100; }
+.tool-status.rejected { background: #fce4ec; color: #880e4f; }
+.tool-status.error    { background: #ffebee; color: #c62828; }
+
+.tool-chevron { font-size: 10px; color: #999; transition: transform 0.15s; flex-shrink: 0; }
+.tool-card.open .tool-chevron { transform: rotate(90deg); }
+
+.tool-body {
+  display: none;
+  padding: 10px 12px;
+}
+
+.tool-card.open .tool-body { display: block; }
+
+.tool-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+.tool-section-label + .tool-section-label { margin-top: 10px; }
+
+.tool-code {
+  font-family: monospace;
+  font-size: 11px;
+  color: #333;
+  background: #f5f5f5;
+  border-radius: 4px;
+  padding: 7px 9px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 140px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.tool-code.output { background: #f0faf0; }
+.tool-card.error .tool-code.output { background: #fff5f5; color: #c62828; }
+
+/* Approval footer — always visible when awaiting approval */
+
+.approval-footer {
   display: flex;
   gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid #f5a623;
+  background: #fffaf3;
   align-items: center;
-  justify-content: center;
+  min-height: 48px;
 }
+
+.tool-card.open .approval-footer { border-top-color: #e0e0e0; background: #fafafa; }
+
+.btn-approve,
+.btn-reject {
+  padding: 7px 18px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 32px;
+}
+
+.btn-approve { background: #2e7d32; color: #fff; }
+.btn-reject  { background: #c62828; color: #fff; }
+.btn-approve:disabled,
+.btn-reject:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Skills library modal */
 
