@@ -747,7 +747,7 @@ class Space extends LitElement {
             secondary-min="400"
             label="Resize chat panel"
           >
-            <da-chat class="space-chat-panel" .onPageContextItems="${this._chatContextItems ?? []}"></da-chat>
+            <da-chat class="space-chat-panel" .contextItems="${this._chatContextItems ?? []}"></da-chat>
             ${this._renderInnerSplit(iframeSrc)}
           </sp-split-view>
           ` : this._renderInnerSplit(iframeSrc)}

@@ -100,7 +100,6 @@ export class ChatController {
     this.processedUpdateToolCalls = new Set();
     this._pendingApprovalIds = new Set();
     this._abortController = null;
-    this._pendingOnPageContextItems = null;
   }
 
   get _chatUrl() {
@@ -513,33 +512,11 @@ export class ChatController {
       });
   }
 
-  injectOnPageContext(agentMessages) {
-    const pendingItems = this._pendingOnPageContextItems;
-    this._pendingOnPageContextItems = null;
-    if (!Array.isArray(pendingItems) || pendingItems.length === 0) return agentMessages;
-
-    const contextPrefix = 'The user has selected the following items on the page as additional context to their request:';
-    const contextText = `${contextPrefix}\n${JSON.stringify(pendingItems, null, 2)}`;
-    const systemMessage = {
-      id: 'da-on-page-context',
-      role: 'system',
-      content: contextText,
-      parts: [{ type: 'text', text: contextText }],
-    };
-    const lastIdx = agentMessages.length - 1;
-    const before = agentMessages.slice(0, lastIdx);
-    const after = agentMessages.slice(lastIdx);
-    return [...before, systemMessage, ...after];
-  }
-
   // ---------- public API ----------
 
-  async sendMessage(text, onPageContextItems = []) {
+  async sendMessage(text) {
     const content = (text || '').trim();
     if (!content || this.isThinking || this.isAwaitingApproval || !this.connected) return;
-
-    const hasContextItems = Array.isArray(onPageContextItems) && onPageContextItems.length > 0;
-    this._pendingOnPageContextItems = hasContextItems ? onPageContextItems : null;
 
     this.messages = [...this.messages, {
       role: 'user',
@@ -610,9 +587,7 @@ export class ChatController {
   async _resumeWithMessages() {
     // Snapshot messages before adding the placeholder so the agent never
     // receives a conversation that ends with the '...' placeholder.
-    let agentMessages = this.toAgentMessages();
-    agentMessages = this.injectOnPageContext(agentMessages);
-
+    const agentMessages = this.toAgentMessages();
     const pageContext = this.getContext();
     // eslint-disable-next-line no-console
     console.debug('[da-chat] sending request, messages:', JSON.stringify(agentMessages), 'context:', pageContext);
