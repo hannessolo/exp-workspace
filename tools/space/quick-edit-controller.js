@@ -40,11 +40,25 @@ export function getInstrumentedHTML(view) {
     }
   });
 
-  editorClone.querySelectorAll('table').forEach((table) => {
+  // Block instrumentation (same as da-nx qe-advanced): wrap blocks (e.g. tables), add a
+  // sentinel with data-prose-index, then after serialization move it to wrapper as data-block-index
+  const originalTables = view.dom.querySelectorAll('table');
+  const clonedTables = editorClone.querySelectorAll('table');
+  clonedTables.forEach((table, index) => {
     const div = document.createElement('div');
     div.className = 'tableWrapper';
     table.insertAdjacentElement('afterend', div);
     div.append(table);
+    const blockMarker = document.createElement('div');
+    blockMarker.className = 'block-marker';
+    try {
+      const position = view.posAtDOM(originalTables[index], 0);
+      blockMarker.setAttribute('data-prose-index', position);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('Could not find position for table block:', e);
+    }
+    div.insertAdjacentElement('beforebegin', blockMarker);
   });
 
   const remoteCursors = editorClone.querySelectorAll('.ProseMirror-yjs-cursor');
@@ -66,7 +80,14 @@ export function getInstrumentedHTML(view) {
     }
   });
 
-  return prose2aem(editorClone, true, false, true);
+  // Serialize clone to HTML, then move block-marker index onto wrapper as data-block-index
+  // (same pattern as da-nx qe-advanced: getInstrumentedHTML in prose2aem.js).
+  let htmlString = prose2aem(editorClone, true, false, true);
+  htmlString = htmlString.replace(
+    /<div class="block-marker" data-prose-index="(\d+)"><\/div>\s*<div([^>]*?)>/gi,
+    (match, proseIndex, divAttributes) => `<div${divAttributes} data-block-index="${proseIndex}">`,
+  );
+  return htmlString;
 }
 
 export function updateDocument(ctx) {
@@ -387,6 +408,8 @@ export function createControllerOnMessage(ctx) {
       handlePreview(ctx);
     } else if (e.data.type === 'move-block') {
       moveBlockAt(e.data, ctx);
+    } else if (e.data.type === 'quick-edit-add-to-chat') {
+      ctx.onAddToChat?.(e.data.payload);
     }
   };
 }

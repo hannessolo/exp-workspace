@@ -42,6 +42,7 @@ function getContextFromHash() {
 class Chat extends LitElement {
   static properties = {
     header: { type: String },
+    contextItems: { type: Array },
     _connected: { state: true },
     _messages: { state: true },
     _inputValue: { state: true },
@@ -54,6 +55,7 @@ class Chat extends LitElement {
   constructor() {
     super();
     this.header = 'Assistant';
+    this.contextItems = [];
     this._connected = false;
     this._messages = [];
     this._inputValue = '';
@@ -184,6 +186,28 @@ class Chat extends LitElement {
     if (!args || typeof args !== 'object') return '';
     const text = JSON.stringify(args, null, 2);
     return html`<pre class="approval-args">${text}</pre>`;
+  }
+
+  /**
+   * Label for a context item pill: block name if block, else first 20 chars + '...'
+   * @param {{ blockName?: string, innerText: string }} item
+   * @returns {string}
+   */
+  // eslint-disable-next-line class-methods-use-this
+  _contextPillLabel(item) {
+    if (!item) return '';
+    if (item.blockName && item.blockName.trim()) return item.blockName.trim();
+    const text = (item.innerText || '').trim();
+    if (text.length <= 20) return text;
+    return `${text.slice(0, 20)}...`;
+  }
+
+  _removeContextItem(index) {
+    this.dispatchEvent(new CustomEvent('chat-context-remove', {
+      bubbles: true,
+      composed: true,
+      detail: { index },
+    }));
   }
 
   _renderToolPart(part) {
@@ -349,6 +373,17 @@ class Chat extends LitElement {
         </div>
 
         <div class="chat-footer">
+          ${(this.contextItems?.length ?? 0) > 0 ? html`
+          <div class="chat-context-pills">
+            ${(this.contextItems || []).map((item, i) => html`
+              <span class="chat-context-pill" title="${(item.innerText || '').slice(0, 100)}${(item.innerText?.length ?? 0) > 100 ? '…' : ''}">
+                <button type="button" class="chat-context-pill-remove" aria-label="Remove from context" @click=${() => this._removeContextItem(i)}>×</button>
+                <span class="chat-context-pill-label">${this._contextPillLabel(item)}</span>
+              </span>
+            `)}
+          </div>
+          ` : ''}
+          <div class="chat-footer-row">
           ${this._renderSkillsButton()}
           <sp-textfield
             class="chat-input"
@@ -366,6 +401,7 @@ class Chat extends LitElement {
                 ?disabled=${!this._inputValue.trim() || !this._connected || this._isAwaitingApproval}
                 @click=${this._sendMessage}
               >Send</sp-button>`}
+          </div>
         </div>
 
         <div class="chat-status">${this._statusText}</div>

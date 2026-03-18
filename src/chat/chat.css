@@ -261,11 +261,73 @@
 .chat-footer {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-end;
   padding: 10px 16px;
   background: #fff;
   border-top: 1px solid #e0e0e0;
+}
+
+.chat-context-pills {
+  width: 100%;
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.chat-context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1.2;
+  padding: 2px 8px 2px 2px;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: #1967d2;
+  border: 1px solid #a8c7fa;
+  max-width: 220px;
+}
+
+.chat-context-pill-remove {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #1967d2;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-context-pill-remove:hover {
+  background: rgb(25 103 210 / 20%);
+  color: #0d47a1;
+}
+
+.chat-context-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.chat-footer-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  width: 100%;
+  flex-basis: 100%;
 }
 
 .chat-input {

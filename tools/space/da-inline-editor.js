@@ -149,6 +149,13 @@ export default class DaInlineEditor extends LitElement {
       repo: this.repo,
       path: this._controllerPathname,
       getToken,
+      onAddToChat: (payload) => {
+        this.dispatchEvent(new CustomEvent('quick-edit-add-to-chat', {
+          bubbles: true,
+          composed: true,
+          detail: { payload },
+        }));
+      },
     };
 
     this.quickEditPort.onmessage = createControllerOnMessage(this._controllerCtx);

@@ -76,6 +76,7 @@ class Space extends LitElement {
     _outlineHtml: { state: true },
     _blockPositions: { state: true },
     _pendingMove: { state: true },
+    _chatContextItems: { state: true },
   };
 
   constructor() {
@@ -86,6 +87,7 @@ class Space extends LitElement {
     this._outlineHtml = '';
     this._blockPositions = [];
     this._pendingMove = null;
+    this._chatContextItems = [];
     this._sidebarTab = 'files';
     this._viewMode = 'wysiwyg';
     this._chatOpen = true;
@@ -135,6 +137,21 @@ class Space extends LitElement {
 
   _onMoveBlockDone = () => {
     this._pendingMove = null;
+  };
+
+  _boundQuickEditAddToChat = (e) => {
+    const { payload } = e?.detail ?? {};
+    if (!payload || typeof payload.proseIndex !== 'number' || typeof payload.innerText !== 'string') return;
+    this._chatContextItems = [...(this._chatContextItems || []), payload];
+  };
+
+  _boundChatContextRemove = (e) => {
+    const { index } = e?.detail ?? {};
+    if (typeof index !== 'number' || index < 0) return;
+    const list = [...(this._chatContextItems || [])];
+    if (index >= list.length) return;
+    list.splice(index, 1);
+    this._chatContextItems = list;
   };
 
   _onViewModeChange = (e) => {
@@ -334,6 +351,8 @@ class Space extends LitElement {
     this.shadowRoot.adoptedStyleSheets = [style];
     this._boundHashChange();
     window.addEventListener('hashchange', this._boundHashChange);
+    this.addEventListener('quick-edit-add-to-chat', this._boundQuickEditAddToChat);
+    this.addEventListener('chat-context-remove', this._boundChatContextRemove);
     this.addEventListener('da-file-browser-select', this._boundFileSelect);
     this.addEventListener('da-collab-users', this._boundCollabUsers);
   }
@@ -372,6 +391,8 @@ class Space extends LitElement {
 
   disconnectedCallback() {
     window.removeEventListener('hashchange', this._boundHashChange);
+    this.removeEventListener('quick-edit-add-to-chat', this._boundQuickEditAddToChat);
+    this.removeEventListener('chat-context-remove', this._boundChatContextRemove);
     this.removeEventListener('da-file-browser-select', this._boundFileSelect);
     this.removeEventListener('da-collab-users', this._boundCollabUsers);
     super.disconnectedCallback();
@@ -384,7 +405,7 @@ class Space extends LitElement {
     const pathWithoutOrgRepo = segments.slice(2).join('/');
     const pathWithoutHtml = pathWithoutOrgRepo.replace(/\.html$/i, '');
     const encodedPath = pathWithoutHtml.split('/').map(encodeURIComponent).join('/');
-    const base = `https://main--${repo}--${org}.preview.da.live/${encodedPath}?nx=exp-workspace&quick-edit=exp-workspace`;
+    const base = `https://main--${repo}--${org}.preview.da.live/${encodedPath}?nx=exp-workspace&quick-edit=exp-workspace-overlay`;
     return `${base}&controller=parent`;
   }
 
@@ -726,7 +747,7 @@ class Space extends LitElement {
             secondary-min="400"
             label="Resize chat panel"
           >
-            <da-chat class="space-chat-panel"></da-chat>
+            <da-chat class="space-chat-panel" .contextItems="${this._chatContextItems ?? []}"></da-chat>
             ${this._renderInnerSplit(iframeSrc)}
           </sp-split-view>
           ` : this._renderInnerSplit(iframeSrc)}
