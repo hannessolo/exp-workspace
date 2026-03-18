@@ -42,7 +42,7 @@ function getContextFromHash() {
 class Chat extends LitElement {
   static properties = {
     header: { type: String },
-    contextItems: { type: Array },
+    onPageContextItems: { type: Array },
     _connected: { state: true },
     _messages: { state: true },
     _inputValue: { state: true },
@@ -56,7 +56,7 @@ class Chat extends LitElement {
   constructor() {
     super();
     this.header = 'Assistant';
-    this.contextItems = [];
+    this.onPageContextItems = [];
     this._connected = false;
     this._messages = [];
     this._inputValue = '';
@@ -137,7 +137,8 @@ class Chat extends LitElement {
     const content = this._inputValue.trim();
     if (!content || this._isThinking || this._isAwaitingApproval || !this._chatController) return;
     this._inputValue = '';
-    this._chatController.sendMessage(content);
+    this._chatController.sendMessage(content, this.onPageContextItems ?? []);
+    this.dispatchEvent(new CustomEvent('da-chat-message-sent', { bubbles: true }));
   }
 
   _stopRequest() {
@@ -155,7 +156,8 @@ class Chat extends LitElement {
 
   _sendPrompt(prompt) {
     if (!prompt || this._isThinking || this._isAwaitingApproval || !this._connected) return;
-    this._chatController?.sendMessage(prompt);
+    this._chatController?.sendMessage(prompt, this.onPageContextItems ?? []);
+    this.dispatchEvent(new CustomEvent('da-chat-message-sent', { bubbles: true }));
   }
 
   // eslint-disable-next-line class-methods-use-this
@@ -388,9 +390,9 @@ class Chat extends LitElement {
         </div>
 
         <div class="chat-footer">
-          ${(this.contextItems?.length ?? 0) > 0 ? html`
+          ${(this.onPageContextItems?.length ?? 0) > 0 ? html`
           <div class="chat-context-pills">
-            ${(this.contextItems || []).map((item, i) => html`
+            ${(this.onPageContextItems || []).map((item, i) => html`
               <span class="chat-context-pill" title="${(item.innerText || '').slice(0, 100)}${(item.innerText?.length ?? 0) > 100 ? '…' : ''}">
                 <button type="button" class="chat-context-pill-remove" aria-label="Remove from context" @click=${() => this._removeContextItem(i)}>×</button>
                 <span class="chat-context-pill-label">${this._contextPillLabel(item)}</span>

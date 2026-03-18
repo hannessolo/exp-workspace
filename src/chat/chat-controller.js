@@ -514,14 +514,27 @@ export class ChatController {
 
   // ---------- public API ----------
 
-  async sendMessage(text) {
+  async sendMessage(text, onPageContextItems = []) {
     const content = (text || '').trim();
     if (!content || this.isThinking || this.isAwaitingApproval || !this.connected) return;
 
+    const hasContextItems = Array.isArray(onPageContextItems) && onPageContextItems.length > 0;
+    let messageContent = content;
+    if (hasContextItems) {
+      const contextBlock = [
+        '---- Additional Context for request: ----',
+        JSON.stringify(onPageContextItems, null, 2),
+        '---- End Additional Context ----',
+        'User request:',
+        content,
+      ].join('\n');
+      messageContent = contextBlock;
+    }
+
     this.messages = [...this.messages, {
       role: 'user',
-      content,
-      parts: [{ type: 'text', text: content }],
+      content: messageContent,
+      parts: [{ type: 'text', text: messageContent }],
     }];
     this.isThinking = true;
     this.statusText = 'Thinking...';

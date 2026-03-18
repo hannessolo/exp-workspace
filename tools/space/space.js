@@ -154,6 +154,10 @@ class Space extends LitElement {
     this._chatContextItems = list;
   };
 
+  _onChatMessageSent = () => {
+    this._chatContextItems = [];
+  };
+
   _onViewModeChange = (e) => {
     const { selected } = e.target;
     const value = Array.isArray(selected) && selected.length > 0 ? selected[0] : 'split';
@@ -747,7 +751,7 @@ class Space extends LitElement {
             secondary-min="400"
             label="Resize chat panel"
           >
-            <da-chat class="space-chat-panel" .contextItems="${this._chatContextItems ?? []}"></da-chat>
+            <da-chat class="space-chat-panel" .onPageContextItems="${this._chatContextItems ?? []}" @da-chat-message-sent=${this._onChatMessageSent}></da-chat>
             ${this._renderInnerSplit(iframeSrc)}
           </sp-split-view>
           ` : this._renderInnerSplit(iframeSrc)}
