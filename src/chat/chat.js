@@ -227,7 +227,8 @@ class Chat extends LitElement {
     const isApproval = state === 'approval-requested';
     const isRejected = state === 'output-denied';
     const isDone = state === 'output-available';
-    const isError = isDone && output && (output.error || ('success' in output && !output.success));
+    const isError = isDone && output && typeof output === 'object'
+      && (output.error || ('success' in output && !output.success));
     const isOpen = this._openToolCards?.has(toolCallId);
 
     const icon = isApproval ? '⚠️' : '🔧';
