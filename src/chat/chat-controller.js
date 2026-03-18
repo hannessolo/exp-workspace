@@ -1,13 +1,5 @@
 import { loadMessages, saveMessages, clearMessages } from './chat-idb-store.js';
 
-// Tools that require explicit user approval before execution.
-const APPROVAL_REQUIRED_TOOLS = new Set([
-  'da_create_source',
-  'da_update_source',
-  'da_delete_source',
-  'da_move_content',
-]);
-
 function normalizePath(path) {
   if (typeof path !== 'string') return '';
   return path
@@ -16,65 +8,6 @@ function normalizePath(path) {
     .split('#')[0]
     .replace(/^\/+/, '')
     .replace(/\.html$/i, '');
-}
-
-function getToolName(part) {
-  if (typeof part?.toolName === 'string' && part.toolName) return part.toolName;
-  if (typeof part?.type === 'string' && part.type.startsWith('tool-')) {
-    return part.type.replace('tool-', '');
-  }
-  return '';
-}
-
-function getPathFromToolPart(part) {
-  if (part?.output && typeof part.output === 'object') {
-    if (typeof part.output.path === 'string') return part.output.path;
-    if (typeof part.output?.data?.path === 'string') return part.output.data.path;
-  }
-  if (part?.input && typeof part.input === 'object' && typeof part.input.path === 'string') {
-    return part.input.path;
-  }
-  return '';
-}
-
-function isToolOutputSuccess(part) {
-  if (!part?.output || typeof part.output !== 'object') return false;
-  if (part.output.error) return false;
-  if ('success' in part.output) return part.output.success === true;
-  return true;
-}
-
-function extractTextFromParts(parts) {
-  if (!Array.isArray(parts)) return '';
-  return parts
-    .filter((part) => part?.type === 'text' && typeof part.text === 'string')
-    .map((part) => part.text)
-    .join('');
-}
-
-function normalizeMessage(message) {
-  // Tool-result messages have an array content — preserve them as-is.
-  if (message?.role === 'tool') {
-    return {
-      id: message?.id,
-      role: 'tool',
-      content: Array.isArray(message.content) ? message.content : [],
-      parts: [],
-    };
-  }
-  const rawParts = Array.isArray(message?.parts) ? message.parts : [];
-  const content = extractTextFromParts(rawParts)
-    || (typeof message?.content === 'string' ? message.content : '');
-  let parts = rawParts;
-  if (rawParts.length === 0 && content) {
-    parts = [{ type: 'text', text: content }];
-  }
-  return {
-    id: message?.id,
-    role: message?.role === 'user' ? 'user' : 'assistant',
-    content,
-    parts,
-  };
 }
 
 export class ChatController {
@@ -90,16 +23,24 @@ export class ChatController {
     this.onConnectionChange = options.onConnectionChange || (() => {});
     this.onDocumentUpdated = options.onDocumentUpdated || (() => {});
 
+    // CoreMessage[] — exactly what gets sent to the server, no transformation needed.
     this.messages = [];
+    // Map<toolCallId, { toolName, input, state, approvalId, output }> — UI display state.
+    this.toolCards = new Map();
+
     this.connected = false;
     this.isThinking = false;
     this.isAwaitingApproval = false;
     this.statusText = '';
+    // In-flight assistant text (committed to messages on text-end).
+    this.streamingText = '';
 
-    this.activeAssistantIndex = null;
-    this.processedUpdateToolCalls = new Set();
-    this._pendingApprovalIds = new Set();
+    // toolCallId → approvalId for tools awaiting user decision.
+    this._pendingApprovals = new Map();
+    // toolCallId → toolName (tool-output-available events lack toolName).
+    this._toolNameById = {};
     this._abortController = null;
+    this._processedUpdateToolCalls = new Set();
   }
 
   get _chatUrl() {
@@ -111,7 +52,6 @@ export class ChatController {
     if (this.connected) return;
 
     try {
-      // Any HTTP response means the server is reachable; only a network error means it isn't.
       await fetch(this._chatUrl, {
         method: 'HEAD',
         signal: AbortSignal.timeout(5000),
@@ -137,8 +77,8 @@ export class ChatController {
     this.connected = false;
     this.isThinking = false;
     this.isAwaitingApproval = false;
-    this._pendingApprovalIds.clear();
-    this.activeAssistantIndex = null;
+    this._pendingApprovals.clear();
+    this.streamingText = '';
     this.statusText = 'Disconnected';
 
     this.onConnectionChange(false);
@@ -149,7 +89,6 @@ export class ChatController {
   // ---------- stream reading ----------
 
   _processStreamLine(rawLine) {
-    // Strip SSE "data: " prefix
     const line = rawLine.startsWith('data: ') ? rawLine.slice(6) : rawLine;
     if (!line.trim() || line === '[DONE]') return;
 
@@ -163,44 +102,132 @@ export class ChatController {
     if (!event || typeof event !== 'object') return;
 
     switch (event.type) {
-      case 'text-delta': {
-        const delta = event.delta ?? event.textDelta ?? event.text;
-        if (typeof delta === 'string') this.appendToActiveAssistantMessage(delta);
+      case 'text-start':
+        this.streamingText = '';
+        break;
+
+      case 'text-delta':
+        this.streamingText += event.delta ?? event.textDelta ?? event.text ?? '';
+        this.onUpdate();
+        break;
+
+      case 'text-end':
+        if (this.streamingText) {
+          this.messages = [...this.messages, { role: 'assistant', content: this.streamingText }];
+        }
+        this.streamingText = '';
+        this.onUpdate();
+        break;
+
+      case 'tool-call':
+      case 'tool-input-available': {
+        const { toolCallId, toolName } = event;
+        const input = event.input ?? event.args ?? {};
+        this._toolNameById[toolCallId] = toolName;
+        // Push CoreMessage directly — same format as the server expects.
+        this.messages = [
+          ...this.messages,
+          {
+            role: 'assistant',
+            content: [{
+              type: 'tool-call', toolCallId, toolName, input,
+            }],
+          },
+        ];
+        const nextCards = new Map(this.toolCards);
+        nextCards.set(toolCallId, { toolName, input, state: 'running' });
+        this.toolCards = nextCards;
+        this.onUpdate();
         break;
       }
-      case 'tool-call':
-      case 'tool-input-available':
-        this._handleToolCallStart(event);
+
+      case 'tool-approval-request': {
+        const { toolCallId, approvalId } = event;
+        // Append tool-approval-request to the assistant message that contains the matching
+        // tool-call, so the server's resolveApprovals() can find it by approvalId.
+        this.messages = this.messages.map((msg) => {
+          if (msg.role !== 'assistant' || !Array.isArray(msg.content)) return msg;
+          if (!msg.content.some((p) => p.type === 'tool-call' && p.toolCallId === toolCallId)) {
+            return msg;
+          }
+          return {
+            ...msg,
+            content: [...msg.content, { type: 'tool-approval-request', approvalId, toolCallId }],
+          };
+        });
+        const nextCards = new Map(this.toolCards);
+        const existing = nextCards.get(toolCallId) || {
+          toolName: event.toolName || '',
+          input: event.input ?? {},
+        };
+        nextCards.set(toolCallId, { ...existing, state: 'approval-requested', approvalId });
+        this.toolCards = nextCards;
+        this._pendingApprovals.set(toolCallId, approvalId ?? toolCallId);
+        this.onUpdate();
         break;
-      case 'tool-approval-request':
-        this._handleToolApprovalRequest(event);
+      }
+
+      case 'tool-result':
+      case 'tool-output-available': {
+        const { toolCallId } = event;
+        const toolName = event.toolName ?? this._toolNameById[toolCallId];
+        const raw = event.output ?? event.result;
+        const isError = raw && typeof raw === 'object' && 'error' in raw;
+        const output = typeof raw === 'string'
+          ? { type: 'text', value: raw }
+          : { type: 'json', value: raw };
+        this.messages = [
+          ...this.messages,
+          {
+            role: 'tool',
+            content: [{
+              type: 'tool-result', toolCallId, toolName, output,
+            }],
+          },
+        ];
+        const nextCards = new Map(this.toolCards);
+        const existing = nextCards.get(toolCallId) || { toolName, input: {} };
+        nextCards.set(toolCallId, { ...existing, state: isError ? 'error' : 'done', output: raw });
+        this.toolCards = nextCards;
+        this._pendingApprovals.delete(toolCallId);
+        this._notifyDocumentUpdated(toolCallId, toolName, raw);
+        this.onUpdate();
         break;
-      case 'tool-output-available':
-        this._handleToolResult({ toolCallId: event.toolCallId, result: event.output });
+      }
+
+      case 'finish-message':
+      case 'finish':
+        this._onFinish();
         break;
+
       case 'error':
         this.isThinking = false;
         this.statusText = 'Error';
         this.onStatusChange(this.statusText);
         this.onUpdate();
         break;
-      case 'finish-message':
-      case 'finish':
-        if (this.isThinking) {
-          this.isThinking = false;
-          if (this._pendingApprovalIds.size > 0) {
-            this.isAwaitingApproval = true;
-            this.statusText = 'Approval required';
-          } else {
-            this.statusText = 'Complete';
-          }
-          this.onStatusChange(this.statusText);
-          this.onUpdate();
-        }
-        break;
+
       default:
-        // text-start, start-step, finish-step — no action needed
         break;
+    }
+  }
+
+  _onFinish() {
+    // Flush any text not yet committed (no text-end received).
+    if (this.streamingText) {
+      this.messages = [...this.messages, { role: 'assistant', content: this.streamingText }];
+      this.streamingText = '';
+    }
+    if (this.isThinking) {
+      this.isThinking = false;
+      if (this._pendingApprovals.size > 0) {
+        this.isAwaitingApproval = true;
+        this.statusText = 'Approval required';
+      } else {
+        this.statusText = '';
+      }
+      this.onStatusChange(this.statusText);
+      this.onUpdate();
     }
   }
 
@@ -228,369 +255,76 @@ export class ChatController {
       reader.releaseLock();
     }
 
-    // Fallback: clear thinking state if no finish event arrived
-    if (this.isThinking) {
-      this.isThinking = false;
-      if (this._pendingApprovalIds.size > 0) {
-        this.isAwaitingApproval = true;
-        this.statusText = 'Approval required';
-      } else {
-        this.statusText = 'Complete';
-      }
-      this.onStatusChange(this.statusText);
-      this.onUpdate();
-    }
+    // Fallback: if no finish event arrived, clean up thinking state.
+    if (this.isThinking) this._onFinish();
   }
 
-  // ---------- tool call helpers ----------
+  // ---------- document update notification ----------
 
-  _handleToolCallStart(data) {
-    if (!data || typeof data !== 'object') return;
-    const {
-      toolCallId, toolName, args, input,
-    } = data;
-    if (!toolCallId) return;
-
-    const needsApproval = APPROVAL_REQUIRED_TOOLS.has(toolName);
-    if (needsApproval) this._pendingApprovalIds.add(toolCallId);
-
-    this.ensureAssistantPlaceholder();
-    const idx = this.activeAssistantIndex;
-    if (idx === null) return;
-
-    const next = [...this.messages];
-    const existingParts = Array.isArray(next[idx]?.parts) ? next[idx].parts : [];
-    next[idx] = {
-      ...next[idx],
-      parts: [...existingParts, {
-        type: 'tool-call',
-        toolCallId,
-        toolName: toolName || '',
-        state: needsApproval ? 'approval-requested' : 'input-available',
-        args: args ?? input ?? null,
-        // approvalId may come from the server; fall back to toolCallId for client-gated tools.
-        approval: needsApproval ? { id: data.approvalId || toolCallId } : undefined,
-      }],
-    };
-    this.messages = next;
-    this.onUpdate();
-  }
-
-  _handleToolApprovalRequest(event) {
-    if (!event || typeof event !== 'object') return;
-
-    // Support both flat format (toolCallId/toolName at event top level, as sent by da-agent)
-    // and legacy nested toolCall format.
-    const nested = event.toolCall || {};
-    const toolCallId = event.toolCallId || nested.toolCallId || event.approvalId;
-    const toolName = event.toolName || nested.toolName || '';
-    const approvalId = event.approvalId || toolCallId;
-    const args = event.input ?? event.args ?? nested.input ?? nested.args ?? null;
-
-    if (!toolCallId) return;
-
-    this._pendingApprovalIds.add(toolCallId);
-
-    // If a tool-call part already exists (created by _handleToolCallStart on tool-input-available),
-    // just update it with the real approvalId rather than creating a duplicate.
-    const next = [...this.messages];
-    const msgIdx = next.findIndex((msg) => (
-      Array.isArray(msg.parts) && msg.parts.some((p) => p?.toolCallId === toolCallId)
-    ));
-    if (msgIdx >= 0) {
-      next[msgIdx] = {
-        ...next[msgIdx],
-        parts: next[msgIdx].parts.map((p) => (
-          p?.toolCallId === toolCallId
-            ? { ...p, state: 'approval-requested', approval: { id: approvalId } }
-            : p
-        )),
-      };
-      this.messages = next;
-      this.onUpdate();
-      return;
-    }
-
-    // No existing part — create one (fallback if tool-input-available wasn't received).
-    this.ensureAssistantPlaceholder();
-    const idx = this.activeAssistantIndex;
-    if (idx === null) return;
-
-    const existingParts = Array.isArray(this.messages[idx]?.parts) ? this.messages[idx].parts : [];
-    this.messages = [
-      ...this.messages.slice(0, idx),
-      {
-        ...this.messages[idx],
-        parts: [...existingParts, {
-          type: 'tool-call',
-          toolCallId,
-          toolName,
-          state: 'approval-requested',
-          args,
-          approval: { id: approvalId },
-        }],
-      },
-      ...this.messages.slice(idx + 1),
-    ];
-    this.onUpdate();
-  }
-
-  _handleToolResult(data) {
-    if (!data || typeof data !== 'object') return;
-    const { toolCallId, result } = data;
-    if (!toolCallId) return;
-
-    const next = [...this.messages];
-    const msgIdx = next.findIndex((msg) => (
-      Array.isArray(msg.parts)
-      && msg.parts.some((p) => p?.toolCallId === toolCallId)
-    ));
-    if (msgIdx < 0) return;
-
-    const parts = next[msgIdx].parts.map((p) => {
-      if (p?.toolCallId !== toolCallId) return p;
-      return { ...p, state: 'output-available', output: result };
-    });
-    next[msgIdx] = { ...next[msgIdx], parts };
-    this.messages = next;
-    this.notifyDocumentUpdated(parts);
-    this.onUpdate();
-  }
-
-  // ---------- message helpers ----------
-
-  ensureAssistantPlaceholder() {
-    if (this.activeAssistantIndex !== null) return;
-    this.messages = [...this.messages, {
-      role: 'assistant',
-      content: '...',
-      parts: [{ type: 'text', text: '...' }],
-    }];
-    this.activeAssistantIndex = this.messages.length - 1;
-  }
-
-  appendToActiveAssistantMessage(text) {
-    if (!text) return;
-    this.ensureAssistantPlaceholder();
-
-    const idx = this.activeAssistantIndex;
-    if (idx === null) return;
-
-    const next = [...this.messages];
-    const current = next[idx]?.content || '';
-    const base = current === '...' ? '' : current;
-    const content = `${base}${text}`;
-    const existingParts = Array.isArray(next[idx]?.parts) ? next[idx].parts : [];
-    let textPartUpdated = false;
-    const parts = existingParts.map((part) => {
-      if (!textPartUpdated && part?.type === 'text') {
-        textPartUpdated = true;
-        return { ...part, text: content };
-      }
-      return part;
-    });
-    if (!textPartUpdated) {
-      parts.push({ type: 'text', text: content });
-    }
-    next[idx] = {
-      ...next[idx], role: 'assistant', content, parts,
-    };
-    this.messages = next;
-    this.onUpdate();
-  }
-
-  notifyDocumentUpdated(parts) {
-    if (!Array.isArray(parts)) return;
+  _notifyDocumentUpdated(toolCallId, toolName, output) {
+    if (toolName !== 'da_update_source') return;
+    if (!output || typeof output !== 'object' || output.error) return;
+    if ('success' in output && !output.success) return;
 
     const context = this.getContext();
     if (context?.view !== 'edit') return;
+
     const currentPath = normalizePath(context.path || '');
     if (!currentPath) return;
 
-    parts.forEach((part) => {
-      if (!part || typeof part !== 'object') return;
-      if (part.state !== 'output-available') return;
+    const card = this.toolCards.get(toolCallId);
+    const targetPath = normalizePath(card?.input?.path || '');
+    if (!targetPath || targetPath !== currentPath) return;
 
-      const toolName = getToolName(part);
-      if (toolName !== 'da_update_source') return;
-      if (!isToolOutputSuccess(part)) return;
+    if (this._processedUpdateToolCalls.has(toolCallId)) return;
+    this._processedUpdateToolCalls.add(toolCallId);
 
-      const toolCallId = typeof part.toolCallId === 'string' ? part.toolCallId : '';
-      if (toolCallId && this.processedUpdateToolCalls.has(toolCallId)) return;
-
-      const targetPath = normalizePath(getPathFromToolPart(part));
-      if (!targetPath || targetPath !== currentPath) return;
-
-      if (toolCallId) this.processedUpdateToolCalls.add(toolCallId);
-
-      this.onDocumentUpdated({ toolName, toolCallId, path: targetPath });
-    });
-  }
-
-  syncMessagesFromAgent(agentMessages) {
-    const nextMessages = [];
-
-    agentMessages.forEach((message) => {
-      if (message?.role === 'tool') {
-        if (Array.isArray(message.content) && message.content.length > 0) {
-          nextMessages.push({
-            id: message?.id, role: 'tool', content: message.content, parts: [],
-          });
-        }
-        return;
-      }
-      const normalized = normalizeMessage(message);
-      if (!normalized.content && normalized.parts.length === 0) return;
-      nextMessages.push(normalized);
-    });
-
-    this.messages = nextMessages;
-    this.activeAssistantIndex = null;
-    this.onUpdate();
-  }
-
-  toAgentMessages() {
-    return this.messages
-      .filter((message) => {
-        if (message.role === 'tool') return true;
-        const text = extractTextFromParts(message.parts) || message.content || '';
-        const hasTool = Array.isArray(message.parts) && message.parts.some((p) => p?.toolCallId);
-        return hasTool || (text.trim().length > 0 && text.trim() !== '...');
-      })
-      .map((message, index) => {
-        // Tool messages (results, approval responses): pass content array through unchanged.
-        if (message.role === 'tool') {
-          return {
-            id: message.id || `da-local-${index}`,
-            role: 'tool',
-            content: message.content,
-          };
-        }
-
-        const textContent = extractTextFromParts(message.parts) || message.content || '';
-        const toolParts = Array.isArray(message.parts)
-          ? message.parts.filter((p) => p?.toolCallId)
-          : [];
-
-        // Assistant messages with tool calls: build a content array the server can process.
-        // The server reads `call.input` to get tool args, and matches approvals by
-        // finding `tool-approval-request` parts with the matching approvalId.
-        if (toolParts.length > 0) {
-          const contentParts = [];
-          if (textContent && textContent.trim() && textContent.trim() !== '...') {
-            contentParts.push({ type: 'text', text: textContent });
-          }
-          toolParts.forEach((p) => {
-            contentParts.push({
-              type: 'tool-call',
-              toolCallId: p.toolCallId,
-              toolName: p.toolName || '',
-              input: p.args ?? {},
-            });
-            // Include approval-request so the server can match the approval response.
-            if (p.approval?.id) {
-              contentParts.push({
-                type: 'tool-approval-request',
-                approvalId: p.approval.id,
-                toolCallId: p.toolCallId,
-              });
-            }
-          });
-          return {
-            id: message.id || `da-local-${index}`,
-            role: 'assistant',
-            content: contentParts,
-          };
-        }
-
-        // Text-only assistant/user message.
-        return {
-          id: message.id || `da-local-${index}`,
-          role: message.role,
-          content: textContent,
-        };
-      });
+    this.onDocumentUpdated({ toolName, toolCallId, path: targetPath });
   }
 
   // ---------- public API ----------
 
-  async sendMessage(text, onPageContextItems = []) {
+  async sendMessage(text) {
     const content = (text || '').trim();
     if (!content || this.isThinking || this.isAwaitingApproval || !this.connected) return;
 
-    const hasContextItems = Array.isArray(onPageContextItems) && onPageContextItems.length > 0;
-    let messageContent = content;
-    if (hasContextItems) {
-      const contextBlock = [
-        '---- Additional Context for request: ----',
-        JSON.stringify(onPageContextItems, null, 2),
-        '---- End Additional Context ----',
-        'User request:',
-        content,
-      ].join('\n');
-      messageContent = contextBlock;
-    }
-
-    this.messages = [...this.messages, {
-      role: 'user',
-      content: messageContent,
-      parts: [{ type: 'text', text: messageContent }],
-    }];
+    this.messages = [...this.messages, { role: 'user', content }];
     this.isThinking = true;
     this.statusText = 'Thinking...';
-    this.activeAssistantIndex = null;
+    this.onStatusChange(this.statusText);
+    this.onUpdate();
 
     await this._resumeWithMessages();
   }
 
   async approveToolCall({ toolCallId, approved }) {
-    if (!this._pendingApprovalIds.has(toolCallId)) return;
-    this._pendingApprovalIds.delete(toolCallId);
+    const approvalId = this._pendingApprovals.get(toolCallId);
+    if (!approvalId) return;
+    this._pendingApprovals.delete(toolCallId);
 
-    // Update the part state to reflect the user's decision.
-    const next = [...this.messages];
-    const msgIdx = next.findIndex((msg) => (
-      Array.isArray(msg.parts) && msg.parts.some((p) => p?.toolCallId === toolCallId)
-    ));
-    if (msgIdx >= 0) {
-      next[msgIdx] = {
-        ...next[msgIdx],
-        parts: next[msgIdx].parts.map((p) => (
-          p?.toolCallId === toolCallId
-            ? { ...p, state: approved ? 'input-available' : 'output-denied' }
-            : p
-        )),
-      };
-      this.messages = next;
+    // Update tool card for immediate UI feedback.
+    const nextCards = new Map(this.toolCards);
+    const card = nextCards.get(toolCallId);
+    if (card) {
+      nextCards.set(toolCallId, { ...card, state: approved ? 'approved' : 'rejected' });
+      this.toolCards = nextCards;
     }
 
-    // Find the approval ID stored on the part (may differ from toolCallId).
-    let approvalId = toolCallId;
-    this.messages.forEach((msg) => {
-      if (!Array.isArray(msg.parts)) return;
-      msg.parts.forEach((p) => {
-        if (p?.toolCallId === toolCallId && p?.approval?.id) approvalId = p.approval.id;
-      });
-    });
+    this.messages = [
+      ...this.messages,
+      { role: 'tool', content: [{ type: 'tool-approval-response', approvalId, approved }] },
+    ];
 
-    // Append the tool-approval-response message the Vercel AI SDK expects.
-    this.messages = [...this.messages, {
-      role: 'tool',
-      content: [{ type: 'tool-approval-response', approvalId, approved }],
-      parts: [],
-    }];
-
-    if (this._pendingApprovalIds.size > 0) {
-      // More approvals still pending — just update the UI.
+    if (this._pendingApprovals.size > 0) {
+      // More approvals still pending — update UI only.
       this.onUpdate();
       return;
     }
 
-    // All approvals resolved — resume the conversation.
+    // All resolved — resume conversation.
     this.isAwaitingApproval = false;
     this.isThinking = true;
     this.statusText = 'Thinking...';
-    this.activeAssistantIndex = null;
     this.onStatusChange(this.statusText);
     this.onUpdate();
 
@@ -598,17 +332,8 @@ export class ChatController {
   }
 
   async _resumeWithMessages() {
-    // Snapshot messages before adding the placeholder so the agent never
-    // receives a conversation that ends with the '...' placeholder.
-    const agentMessages = this.toAgentMessages();
-    const pageContext = this.getContext();
     // eslint-disable-next-line no-console
-    console.debug('[da-chat] sending request, messages:', JSON.stringify(agentMessages), 'context:', pageContext);
-
-    this.ensureAssistantPlaceholder();
-    this.onStatusChange(this.statusText);
-    this.onUpdate();
-
+    console.debug('[da-chat] sending', this.messages.length, 'messages');
     this._abortController = new AbortController();
 
     try {
@@ -616,8 +341,8 @@ export class ChatController {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          messages: agentMessages,
-          pageContext,
+          messages: this.messages,
+          pageContext: this.getContext(),
           imsToken: this.getImsToken(),
           room: this.room,
         }),
@@ -635,7 +360,8 @@ export class ChatController {
       if (e.name === 'AbortError') return;
       this.isThinking = false;
       this.isAwaitingApproval = false;
-      this._pendingApprovalIds.clear();
+      this._pendingApprovals.clear();
+      this.streamingText = '';
       const isNetworkError = e instanceof TypeError;
       if (isNetworkError) {
         this.connected = false;
@@ -643,11 +369,7 @@ export class ChatController {
       }
       this.statusText = 'Error';
       const errorText = `Error: ${e.message || 'Failed to send message'}`;
-      this.messages = [...this.messages, {
-        role: 'assistant',
-        content: errorText,
-        parts: [{ type: 'text', text: errorText }],
-      }];
+      this.messages = [...this.messages, { role: 'assistant', content: errorText }];
       saveMessages(this.room, this.messages);
       this.onStatusChange(this.statusText);
       this.onUpdate();
@@ -661,7 +383,8 @@ export class ChatController {
     this._abortController = null;
     this.isThinking = false;
     this.isAwaitingApproval = false;
-    this._pendingApprovalIds.clear();
+    this._pendingApprovals.clear();
+    this.streamingText = '';
     this.statusText = 'Stopped';
     this.onStatusChange(this.statusText);
     this.onUpdate();
@@ -672,12 +395,14 @@ export class ChatController {
     this._abortController = null;
     clearMessages(this.room);
     this.messages = [];
-    this.activeAssistantIndex = null;
+    this.toolCards = new Map();
+    this._pendingApprovals.clear();
+    this._toolNameById = {};
+    this.streamingText = '';
     this.isThinking = false;
     this.isAwaitingApproval = false;
-    this._pendingApprovalIds.clear();
     this.statusText = '';
-    this.processedUpdateToolCalls.clear();
+    this._processedUpdateToolCalls.clear();
     this.onStatusChange(this.statusText);
     this.onUpdate();
   }
@@ -685,10 +410,56 @@ export class ChatController {
   async loadInitialMessages() {
     try {
       const cached = await loadMessages(this.room);
-      if (cached.length > 0) this.syncMessagesFromAgent(cached);
+      if (cached.length > 0) {
+        // Discard messages saved in the old format (they have a 'parts' array).
+        // Sending old-format messages causes AI_MissingToolResultsError because tool
+        // calls were stored in 'parts', not in 'content' arrays.
+        if (cached.some((m) => Array.isArray(m.parts))) {
+          clearMessages(this.room);
+          return;
+        }
+        this.messages = cached;
+        this.toolCards = this._rebuildToolCards(cached);
+        this.onUpdate();
+      }
     } catch {
       // IDB unavailable — start with empty history.
     }
+  }
+
+  // Reconstruct toolCards from a saved CoreMessage[] (e.g. loaded from IDB).
+  // eslint-disable-next-line class-methods-use-this
+  _rebuildToolCards(msgs) {
+    const cards = new Map();
+    msgs.forEach((msg) => {
+      if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+        msg.content.forEach((part) => {
+          if (part.type === 'tool-call') {
+            cards.set(part.toolCallId, {
+              toolName: part.toolName || '',
+              input: part.input ?? {},
+              state: 'done',
+              output: null,
+            });
+          }
+        });
+      }
+      if (msg.role === 'tool' && Array.isArray(msg.content)) {
+        msg.content.forEach((part) => {
+          if (part.type === 'tool-result') {
+            const card = cards.get(part.toolCallId);
+            if (card) {
+              const raw = part.output?.value ?? part.output;
+              const isError = raw && typeof raw === 'object' && 'error' in raw;
+              cards.set(part.toolCallId, {
+                ...card, state: isError ? 'error' : 'done', output: raw,
+              });
+            }
+          }
+        });
+      }
+    });
+    return cards;
   }
 }
 
