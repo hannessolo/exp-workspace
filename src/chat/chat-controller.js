@@ -454,10 +454,11 @@ export class ChatController {
       .filter((message) => {
         if (message.role === 'tool') return true;
         const text = extractTextFromParts(message.parts) || message.content || '';
-        return text.trim().length > 0 && text.trim() !== '...';
+        const hasTool = Array.isArray(message.parts) && message.parts.some((p) => p?.toolCallId);
+        return hasTool || (text.trim().length > 0 && text.trim() !== '...');
       })
       .map((message, index) => {
-        // Tool-result messages: pass content array through unchanged.
+        // Tool messages (results, approval responses): pass content array through unchanged.
         if (message.role === 'tool') {
           return {
             id: message.id || `da-local-${index}`,
@@ -465,17 +466,48 @@ export class ChatController {
             content: message.content,
           };
         }
+
         const textContent = extractTextFromParts(message.parts) || message.content || '';
-        // Strip UI-only parts (tool-call state, output, etc.) — send only text parts.
-        const textParts = Array.isArray(message.parts)
-          ? message.parts.filter((p) => p?.type === 'text')
+        const toolParts = Array.isArray(message.parts)
+          ? message.parts.filter((p) => p?.toolCallId)
           : [];
-        const parts = textParts.length > 0 ? textParts : [{ type: 'text', text: textContent }];
+
+        // Assistant messages with tool calls: build a content array the server can process.
+        // The server reads `call.input` to get tool args, and matches approvals by
+        // finding `tool-approval-request` parts with the matching approvalId.
+        if (toolParts.length > 0) {
+          const contentParts = [];
+          if (textContent && textContent.trim() && textContent.trim() !== '...') {
+            contentParts.push({ type: 'text', text: textContent });
+          }
+          toolParts.forEach((p) => {
+            contentParts.push({
+              type: 'tool-call',
+              toolCallId: p.toolCallId,
+              toolName: p.toolName || '',
+              input: p.args ?? {},
+            });
+            // Include approval-request so the server can match the approval response.
+            if (p.approval?.id) {
+              contentParts.push({
+                type: 'tool-approval-request',
+                approvalId: p.approval.id,
+                toolCallId: p.toolCallId,
+              });
+            }
+          });
+          return {
+            id: message.id || `da-local-${index}`,
+            role: 'assistant',
+            content: contentParts,
+          };
+        }
+
+        // Text-only assistant/user message.
         return {
           id: message.id || `da-local-${index}`,
           role: message.role,
           content: textContent,
-          parts,
         };
       });
   }

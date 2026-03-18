@@ -372,7 +372,9 @@ class Chat extends LitElement {
                     </div>
                   `)
     : ''}
-              ${message.content
+              ${typeof message.content === 'string'
+    && message.content
+    && message.role !== 'tool'
     && (!Array.isArray(message.parts)
       || !message.parts.some((p) => p?.type === 'text' && p.text))
     ? html`
