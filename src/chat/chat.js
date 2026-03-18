@@ -45,6 +45,8 @@ class Chat extends LitElement {
     onPageContextItems: { type: Array },
     _connected: { state: true },
     _messages: { state: true },
+    _toolCards: { state: true },
+    _streamingText: { state: true },
     _inputValue: { state: true },
     _isThinking: { state: true },
     _isAwaitingApproval: { state: true },
@@ -63,6 +65,8 @@ class Chat extends LitElement {
     this._isThinking = false;
     this._isAwaitingApproval = false;
     this._statusText = '';
+    this._toolCards = new Map();
+    this._streamingText = '';
     this._skillsLibraryTab = 'skills';
     this._openToolCards = new Set();
     this._chatController = null;
@@ -97,6 +101,8 @@ class Chat extends LitElement {
       getImsToken: () => token,
       onUpdate: () => {
         this._messages = [...this._chatController.messages];
+        this._toolCards = new Map(this._chatController.toolCards);
+        this._streamingText = this._chatController.streamingText;
         this._isThinking = this._chatController.isThinking;
         this._isAwaitingApproval = this._chatController.isAwaitingApproval;
         this._scrollMessagesToBottom();
@@ -160,26 +166,6 @@ class Chat extends LitElement {
     this.dispatchEvent(new CustomEvent('da-chat-message-sent', { bubbles: true }));
   }
 
-  // eslint-disable-next-line class-methods-use-this
-  _getToolName(part) {
-    if (typeof part?.toolName === 'string' && part.toolName) return part.toolName;
-    if (typeof part?.type === 'string' && part.type.startsWith('tool-')) {
-      return part.type.replace('tool-', '');
-    }
-    return 'Tool';
-  }
-
-  // eslint-disable-next-line class-methods-use-this
-  _isToolPart(part) {
-    if (!part || typeof part !== 'object') return false;
-    return !!(
-      part.type === 'dynamic-tool'
-      || part.type === 'tool'
-      || (typeof part.type === 'string' && part.type.startsWith('tool-'))
-      || part.toolCallId
-    );
-  }
-
   _onSkillsNavChange(e) {
     const { value } = e.target;
     if (value) this._skillsLibraryTab = value;
@@ -218,19 +204,17 @@ class Chat extends LitElement {
     }));
   }
 
-  _renderToolPart(part) {
-    if (!this._isToolPart(part)) return '';
+  _renderToolCard(toolCallId) {
+    const card = this._toolCards?.get(toolCallId);
+    if (!card) return '';
 
-    const toolName = this._getToolName(part);
     const {
-      state, toolCallId, args, output,
-    } = part;
-
+      toolName, input, state, output,
+    } = card;
     const isApproval = state === 'approval-requested';
-    const isRejected = state === 'output-denied';
-    const isDone = state === 'output-available';
-    const isError = isDone && output && typeof output === 'object'
-      && (output.error || ('success' in output && !output.success));
+    const isRejected = state === 'rejected';
+    const isDone = state === 'done';
+    const isError = state === 'error';
     const isOpen = this._openToolCards?.has(toolCallId);
 
     const icon = isApproval ? '⚠️' : '🔧';
@@ -240,6 +224,9 @@ class Chat extends LitElement {
     if (isApproval) {
       statusText = 'needs approval';
       statusClass = 'approval';
+    } else if (state === 'approved') {
+      statusText = 'approved…';
+      statusClass = 'running';
     } else if (isRejected) {
       statusText = 'rejected';
       statusClass = 'rejected';
@@ -254,7 +241,7 @@ class Chat extends LitElement {
     // eslint-disable-next-line no-nested-ternary
     const cardStateClass = isApproval ? 'needs-approval' : (isError || isRejected ? 'error' : (isDone ? 'done' : ''));
 
-    const inputText = args && typeof args === 'object' ? JSON.stringify(args, null, 2) : null;
+    const inputText = input && typeof input === 'object' ? JSON.stringify(input, null, 2) : null;
     const outputText = output ? JSON.stringify(output, null, 2) : null;
 
     return html`
@@ -361,32 +348,37 @@ class Chat extends LitElement {
         </div>
 
         <div class="chat-messages" role="log" aria-live="polite">
-          ${this._messages.length === 0 ? this._renderWelcome() : ''}
-          ${this._messages.map((message, index) => html`
-            <div class="message-group" data-message-index=${index}>
-              ${Array.isArray(message.parts) ? message.parts.map((part) => this._renderToolPart(part)) : ''}
-              ${Array.isArray(message.parts)
-    ? message.parts
-      .filter((part) => part?.type === 'text' && typeof part.text === 'string' && part.text)
-      .map((part) => html`
-                    <div class="message-row ${message.role}">
-                      <div class="message-bubble">${part.text}</div>
-                    </div>
-                  `)
-    : ''}
-              ${typeof message.content === 'string'
-    && message.content
-    && message.role !== 'tool'
-    && (!Array.isArray(message.parts)
-      || !message.parts.some((p) => p?.type === 'text' && p.text))
-    ? html`
-                  <div class="message-row ${message.role}">
-                    <div class="message-bubble">${message.content}</div>
-                  </div>
-                `
-    : ''}
-            </div>
-          `)}
+          ${this._messages.length === 0 && !this._streamingText ? this._renderWelcome() : ''}
+          ${this._messages.map((message) => {
+    // Skip protocol-only tool messages (tool-result, tool-approval-response).
+    if (message.role === 'tool') return '';
+
+    // User message — always a plain string.
+    if (message.role === 'user') {
+      return html`
+              <div class="message-row user">
+                <div class="message-bubble">${message.content}</div>
+              </div>`;
+    }
+
+    // Assistant message: either a plain string (text) or an array (tool calls).
+    if (typeof message.content === 'string' && message.content) {
+      return html`
+              <div class="message-row assistant">
+                <div class="message-bubble">${message.content}</div>
+              </div>`;
+    }
+    if (Array.isArray(message.content)) {
+      return html`${message.content
+        .filter((p) => p.type === 'tool-call')
+        .map((p) => this._renderToolCard(p.toolCallId))}`;
+    }
+    return '';
+  })}
+          ${this._streamingText ? html`
+            <div class="message-row assistant">
+              <div class="message-bubble">${this._streamingText}</div>
+            </div>` : ''}
         </div>
 
         <div class="chat-footer">

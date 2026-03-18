@@ -139,14 +139,10 @@
   cursor: not-allowed;
 }
 
-.message-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
 .message-row {
   display: flex;
+  width: 100%;
+  flex-shrink: 0;
 }
 
 .message-row.user {
@@ -181,7 +177,9 @@
 
 .tool-card {
   align-self: flex-start;
+  flex-shrink: 0;
   width: min(480px, 88%);
+  min-height: 40px;
   border: 1px solid #d0d0d0;
   border-radius: 10px;
   font-size: 13px;
